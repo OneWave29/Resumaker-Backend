@@ -33,6 +33,10 @@ gcloud auth configure-docker gcr.io
 export GCP_SA_KEY='{"type":"service_account", ... }'
 echo "$GCP_SA_KEY" | docker login -u _json_key --password-stdin https://gcr.io
 ```
+ 
+## GitHub Actions에서 자동 로그인
+- `deploy.yml`이 SSH 단계에서 `GCP_SA_KEY`를 VM으로 전달해 `deploy.sh`가 자동 로그인합니다.
+- 따라서 VM에 별도 `gcloud login`을 해두지 않아도 됩니다.
 
 ## GitHub Secrets
 - `GCP_PROJECT_ID`: GCP 프로젝트 ID
