@@ -56,6 +56,7 @@ def render_resume_pdf_from_db(user, resume_id: int) -> bytes:
     user + resume_id로 DB에서 이력서를 읽어 PDF 생성
     (권한 체크 포함: 내 이력서만)
     """
+    from weasyprint import HTML
     resume = Resume.objects.filter(id=resume_id, user=user).first()
     if not resume:
         raise ValueError("Resume not found (or no permission).")
