@@ -1,367 +1,101 @@
-from django.http import JsonResponse, HttpResponse
 from django.db import transaction
-from django.utils.dateparse import parse_date
-from decimal import Decimal, InvalidOperation
-from rest_framework.decorators import api_view, permission_classes
-from rest_framework.permissions import IsAuthenticated
-from rest_framework.response import Response
+from django.http import HttpResponse
 from rest_framework import status
+from rest_framework.decorators import api_view, permission_classes, parser_classes
+from rest_framework.permissions import IsAuthenticated, AllowAny
+from rest_framework.response import Response
+from rest_framework.parsers import MultiPartParser
+from drf_spectacular.utils import extend_schema
 
 from .models import Education, Award, Certification, WorkExperience
-from django.views.decorators.csrf import csrf_exempt
-from django.views.decorators.http import require_POST
-import json
-from django.contrib.auth.decorators import login_required
+from .serializers import (
+    MyPageResumeSerializer, FileUploadSerializer, 
+    ResumeIdSerializer, GeminiResponseSerializer
+)
 from .services.resume_context import build_db_context
 from .services.gemini_resume_writer import generate_resume_with_gemini
 from .services.resume_save import save_resume_db_json
+from .services.gemini_resume_parser import extract_text_from_pdf, parse_resume_with_gemini
 
-from .services.gemini_resume_parser import (
-    extract_text_from_pdf,
-    parse_resume_with_gemini,
-)
-
-
-# =========================
-# API: PDF 업로드 → JSON 반환
-# POST /resume/parse-pdf/
-# =========================
-@csrf_exempt  # 해커톤 MVP면 일단 유지(프론트 붙일 때 CSRF 막힘 방지)
-@require_POST
+# --- Resume AI ---
+@extend_schema(summary="PDF 파싱", request=FileUploadSerializer, responses={200: dict}, tags=["Resume AI"])
+@api_view(['POST'])
+@permission_classes([AllowAny])
+@parser_classes([MultiPartParser])
 def parse_pdf(request):
-    if "file" not in request.FILES:
-        return JsonResponse({"error": "file is required"}, status=400)
-
-    pdf_file = request.FILES["file"]
-
-    # 1) PDF → 텍스트 추출
+    pdf_file = request.FILES.get("file")
+    if not pdf_file:
+        return Response({"error": "No file"}, status=400)
     pdf_text = extract_text_from_pdf(pdf_file)
-    if not pdf_text:
-        return JsonResponse(
-            {"error": "텍스트를 추출할 수 없습니다. 스캔본 PDF일 수 있습니다."},
-            status=400,
-        )
+    result = parse_resume_with_gemini(pdf_text)
+    return Response(result)
 
-    # 2) Gemini 호출 → JSON 생성
-    try:
-        result = parse_resume_with_gemini(pdf_text)
-        return JsonResponse(result, json_dumps_params={"ensure_ascii": False})
-    except Exception as e:
-        return JsonResponse({"error": str(e)}, status=500)
-
-
-# =========================
-# (선택) 임시 테스트 페이지
-# GET /resume/
-# 프론트 붙이면 지워도 됨
-# =========================
-def upload_test_page(request):
-    html = """
-    <html>
-      <body>
-        <h2>PDF 업로드 테스트</h2>
-        <form action="/resume/parse-pdf/" method="post" enctype="multipart/form-data">
-          <input type="file" name="file" accept="application/pdf" />
-          <button type="submit">업로드</button>
-        </form>
-        <p>결과는 JSON으로 바로 뜹니다.</p>
-      </body>
-    </html>
-    """
-    return HttpResponse(html)
-
-# ...
-
-@csrf_exempt  # MVP면 유지
-@require_POST
-#@login_required
+@extend_schema(summary="AI 이력서 생성", responses={201: GeminiResponseSerializer}, tags=["Resume AI"])
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
 def generate_resume(request):
-    # 1) 프론트 JSON 받기
-    try:
-        frontend_payload = json.loads(request.body.decode("utf-8") or "{}")
-    except json.JSONDecodeError:
-        return JsonResponse({"error": "Invalid JSON"}, status=400)
-
-    # 2) DB 컨텍스트 만들기
     db_payload = build_db_context(request.user)
-
-    # 3) Gemini에 넘길 context
-    context = {
-        "frontend": frontend_payload,
-        "db": db_payload,
-    }
-
-    # 4) Gemini 호출 (DB 저장용 JSON 반환)
     try:
-        db_json = generate_resume_with_gemini(context)  # {"item_list":[...]}
-    except Exception as e:
-        return JsonResponse({"error": "Gemini generation failed", "detail": str(e)}, status=500)
-
-    # 5) 실제 DB 저장
-    try:
+        db_json = generate_resume_with_gemini({"frontend": request.data, "db": db_payload})
         resume_obj = save_resume_db_json(request.user, db_json)
+        return Response({"resume_id": resume_obj.id, "db_json": db_json}, status=201)
     except Exception as e:
-        return JsonResponse({"error": "DB save failed", "detail": str(e), "gemini_result": db_json}, status=500)
+        return Response({"error": str(e)}, status=500)
 
-    # 6) 응답: resume_id + 저장된 결과 JSON
-    return JsonResponse(
-        {
-            "resume_id": resume_obj.id,
-            "db_json": db_json,  # 프론트에서 미리보기/수정에 쓰기 좋음
-        },
-        json_dumps_params={"ensure_ascii": False},
-    )
-
-@csrf_exempt
-@require_POST
-@login_required
+@extend_schema(summary="PDF 다운로드", request=ResumeIdSerializer, tags=["Resume AI"])
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
 def generate_resume_pdf(request):
     from .services.resume_pdf import render_resume_pdf_from_db
-    try:
-        payload = json.loads(request.body.decode("utf-8") or "{}")
-    except json.JSONDecodeError:
-        return JsonResponse({"error": "Invalid JSON"}, status=400)
-
-    resume_id = payload.get("resume_id")
-    if not resume_id:
-        return JsonResponse({"error": "resume_id is required"}, status=400)
-
-    try:
-        pdf_bytes = render_resume_pdf_from_db(request.user, int(resume_id))
-    except Exception as e:
-        return JsonResponse({"error": "PDF generation failed", "detail": str(e)}, status=500)
-
+    resume_id = request.data.get("resume_id")
+    pdf_bytes = render_resume_pdf_from_db(request.user, int(resume_id))
     response = HttpResponse(pdf_bytes, content_type="application/pdf")
     response["Content-Disposition"] = 'attachment; filename="resume.pdf"'
     return response
 
-
-# =========================
-# TODO: Resume CRUD (나중에 구현)
-# =========================
-def resume_list(request):
-    return JsonResponse({"message": "TODO resume_list"}, status=501)
-
-def resume_create(request):
-    return JsonResponse({"message": "TODO resume_create"}, status=501)
-
-def resume_read(request, resume_id):
-    return JsonResponse({"message": f"TODO resume_read {resume_id}"}, status=501)
-
-def resume_update(request, resume_id):
-    return JsonResponse({"message": f"TODO resume_update {resume_id}"}, status=501)
-
-def resume_delete(request, resume_id):
-    return JsonResponse({"message": f"TODO resume_delete {resume_id}"}, status=501)
-
-
-def _serialize_education(item):
-    return {
-        "id": item.id,
-        "university": item.university,
-        "major": item.major,
-        "enrollment_year": item.enrollment_year,
-        "graduation_year": item.graduation_year,
-        "gpa": item.gpa,
-    }
-
-
-def _serialize_award(item):
-    return {
-        "id": item.id,
-        "competition_name": item.competition_name,
-        "award_title": item.award_title,
-        "award_year": item.award_year,
-        "awarding_organization": item.awarding_organization,
-    }
-
-
-def _serialize_certification(item):
-    return {
-        "id": item.id,
-        "name": item.name,
-        "obtained_date": item.obtained_date.isoformat(),
-        "issuing_organization": item.issuing_organization,
-        "score": item.score,
-        "grade": item.grade,
-    }
-
-
-def _serialize_work_experience(item):
-    return {
-        "id": item.id,
-        "company_name": item.company_name,
-        "start_year": item.start_year,
-        "end_year": item.end_year,
-        "job_title": item.job_title,
-        "job_description": item.job_description,
-    }
-
-
-def _coerce_int(value, field_name):
-    try:
-        return int(value)
-    except (TypeError, ValueError):
-        raise ValueError(f"{field_name} must be an integer")
-
-
-def _coerce_int_optional(value, field_name):
-    if value in (None, ""):
-        return None
-    return _coerce_int(value, field_name)
-
-
-def _coerce_decimal_optional(value, field_name):
-    if value in (None, ""):
-        return None
-    try:
-        return Decimal(str(value))
-    except (InvalidOperation, ValueError):
-        raise ValueError(f"{field_name} must be a decimal number")
-
-
-def _coerce_text_optional(value):
-    if value in (None, ""):
-        return None
-    return value
-
-
-def _validate_required_fields(item, fields, section_name):
-    missing = [
-        field for field in fields if field not in item or item[field] in (None, "")
-    ]
-    if missing:
-        raise ValueError(f"{section_name} missing fields: {', '.join(missing)}")
-
-
-def _replace_items(
-    model,
-    user,
-    items,
-    required_fields,
-    optional_fields,
-    section_name,
-    normalizers=None,
-):
-    if normalizers is None:
-        normalizers = {}
-    if not isinstance(items, list):
-        raise ValueError(f"{section_name} must be a list")
-
-    model.objects.filter(user=user).delete()
-    new_items = []
-    for raw in items:
-        if not isinstance(raw, dict):
-            raise ValueError(f"{section_name} items must be objects")
-        _validate_required_fields(raw, required_fields, section_name)
-        payload = {}
-        for field in required_fields:
-            value = raw[field]
-            if field in normalizers:
-                value = normalizers[field](value)
-            payload[field] = value
-        for field in optional_fields:
-            if field in raw:
-                value = raw.get(field)
-                if field in normalizers:
-                    value = normalizers[field](value)
-                payload[field] = value
-        new_items.append(model(user=user, **payload))
-    model.objects.bulk_create(new_items)
-
-
+# --- MyPage ---
+@extend_schema(summary="마이페이지 조회/수정", request=MyPageResumeSerializer, responses={200: MyPageResumeSerializer}, tags=["MyPage"])
 @api_view(["GET", "PUT"])
 @permission_classes([IsAuthenticated])
 def mypage_resume(request):
-    """
-    마이페이지 학력/수상/자격증/경력 일괄 조회 및 수정 (GET/PUT)
-
-    - GET: 현재 데이터를 조회합니다. 없으면 빈 배열을 반환합니다.
-    - PUT: body에 목록이 포함되면 해당 목록을 전체 교체합니다.
-      body가 비어 있으면 현재 데이터를 그대로 조회합니다.
-    """
     user = request.user
-    payload = request.data or {}
-
-    sections = {
-        "educations": (
-            Education,
-            ["university", "major", "enrollment_year", "graduation_year"],
-            ["gpa"],
-            {
-                "enrollment_year": lambda v: _coerce_int(v, "enrollment_year"),
-                "graduation_year": lambda v: _coerce_int(v, "graduation_year"),
-                "gpa": lambda v: _coerce_decimal_optional(v, "gpa"),
-            },
-        ),
-        "awards": (
-            Award,
-            ["competition_name", "award_title", "award_year", "awarding_organization"],
-            [],
-            {
-                "award_year": lambda v: _coerce_int(v, "award_year"),
-            },
-        ),
-        "certifications": (
-            Certification,
-            ["name", "obtained_date", "issuing_organization"],
-            ["score", "grade"],
-            {
-                "obtained_date": lambda v: (
-                    parse_date(v)
-                    if parse_date(v)
-                    else (_ for _ in ()).throw(ValueError("obtained_date must be YYYY-MM-DD"))
-                ),
-                "score": lambda v: _coerce_int_optional(v, "score"),
-                "grade": _coerce_text_optional,
-            },
-        ),
-        "work_experiences": (
-            WorkExperience,
-            ["company_name", "start_year", "job_title", "job_description"],
-            ["end_year"],
-            {
-                "start_year": lambda v: _coerce_int(v, "start_year"),
-                "end_year": lambda v: _coerce_int_optional(v, "end_year"),
-            },
-        ),
-    }
-
     if request.method == "PUT":
-        try:
+        serializer = MyPageResumeSerializer(data=request.data)
+        if serializer.is_valid():
             with transaction.atomic():
-                for section_name, (model, required_fields, optional_fields, normalizers) in sections.items():
-                    if section_name in payload:
-                        _replace_items(
-                            model=model,
-                            user=user,
-                            items=payload.get(section_name, []),
-                            required_fields=required_fields,
-                            optional_fields=optional_fields,
-                            section_name=section_name,
-                            normalizers=normalizers,
-                        )
-        except ValueError as exc:
-            return Response({"error": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+                for model, key in [(Education, 'educations'), (Award, 'awards'), 
+                                   (Certification, 'certifications'), (WorkExperience, 'work_experiences')]:
+                    if key in serializer.validated_data:
+                        model.objects.filter(user=user).delete()
+                        model.objects.bulk_create([model(user=user, **item) for item in serializer.validated_data[key]])
+        else:
+            return Response(serializer.errors, status=400)
 
-    return Response(
-        {
-            "educations": [
-                _serialize_education(item)
-                for item in Education.objects.filter(user=user).order_by("id")
-            ],
-            "awards": [
-                _serialize_award(item)
-                for item in Award.objects.filter(user=user).order_by("id")
-            ],
-            "certifications": [
-                _serialize_certification(item)
-                for item in Certification.objects.filter(user=user).order_by("id")
-            ],
-            "work_experiences": [
-                _serialize_work_experience(item)
-                for item in WorkExperience.objects.filter(user=user).order_by("id")
-            ],
-        },
-        status=status.HTTP_200_OK,
-    )
+    data = {
+        "educations": Education.objects.filter(user=user).order_by('id'),
+        "awards": Award.objects.filter(user=user).order_by('id'),
+        "certifications": Certification.objects.filter(user=user).order_by('id'),
+        "work_experiences": WorkExperience.objects.filter(user=user).order_by('id'),
+    }
+    return Response(MyPageResumeSerializer(data).data)
+
+# --- Resume CRUD (Stubs) ---
+@extend_schema(summary="목록 조회", tags=["Resume CRUD"])
+@api_view(['GET'])
+def resume_list(request): return Response([])
+
+@extend_schema(summary="상세 조회", tags=["Resume CRUD"])
+@api_view(['GET'])
+def resume_read(request, pk): return Response({"id": pk})
+
+@extend_schema(summary="생성", tags=["Resume CRUD"])
+@api_view(['POST'])
+def resume_create(request): return Response(status=201)
+
+@extend_schema(summary="수정", tags=["Resume CRUD"])
+@api_view(['PUT'])
+def resume_update(request, pk): return Response(status=200)
+
+@extend_schema(summary="삭제", tags=["Resume CRUD"])
+@api_view(['DELETE'])
+def resume_delete(request, pk): return Response(status=204)

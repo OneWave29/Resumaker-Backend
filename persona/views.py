@@ -12,7 +12,11 @@ from .models import Persona
 from .serializers import (
     PersonaSerializer, 
     PersonaCreateSerializer,
-    PersonaTemplateSerializer
+    PersonaTemplateSerializer,
+    InterviewRequestSerializer,
+    InterviewResponseSerializer,
+    QuestionGenerateRequestSerializer,
+    QuestionGenerateResponseSerializer
 )
 from .gemini_utils import get_gemini_response, get_gemini_streaming_response
 import json
@@ -42,18 +46,17 @@ DEFAULT_PERSONA_TEMPLATES = [
 ]
 
 @extend_schema(
-    tags=['Users'],
-    summary='회원가입',
-    description='새로운 사용자를 생성합니다.',
+    tags=['Personas'],
+    summary='페르소나 템플릿 조회',
+    description='기본 제공 페르소나 템플릿 목록을 조회합니다.',
+    responses={
+        200: PersonaTemplateSerializer(many=True)
+    }
 )
 @api_view(['GET'])
 @permission_classes([AllowAny])
 def persona_templates(request):
-    """
-    기본 제공 페르소나 템플릿 조회
-    
-    사용자는 이 템플릿을 기반으로 자신만의 페르소나를 생성할 수 있음
-    """
+    """기본 제공 페르소나 템플릿 조회"""
     serializer = PersonaTemplateSerializer(DEFAULT_PERSONA_TEMPLATES, many=True)
     return Response({
         'templates': serializer.data,
@@ -61,22 +64,31 @@ def persona_templates(request):
     }, status=status.HTTP_200_OK)
 
 @extend_schema(
-    tags=['Users'],
-    summary='로그인',
-    description='사용자 인증 및 세션 생성',
+    tags=['Personas'],
+    summary='템플릿 기반 페르소나 생성',
+    description='기본 템플릿을 기반으로 페르소나를 생성합니다.',
+    request={
+        'application/json': {
+            'type': 'object',
+            'properties': {
+                'template_name': {'type': 'string', 'example': '데이터 분석가'},
+                'custom_name': {'type': 'string', 'example': '나만의 데이터 분석가'},
+                'custom_description': {'type': 'string', 'example': '커스텀 설명'},
+                'custom_prompt': {'type': 'string', 'example': '커스텀 프롬프트'}
+            },
+            'required': ['template_name']
+        }
+    },
+    responses={
+        201: PersonaSerializer,
+        400: OpenApiExample('Error', value={'error': 'template_name is required'}),
+        404: OpenApiExample('Not Found', value={'error': 'Template not found'})
+    }
 )
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def create_persona_from_template(request):
-    """
-    템플릿 기반 페르소나 생성
-    
-    요청 필드:
-    - template_name: 템플릿 이름 (필수)
-    - custom_name: 커스텀 이름 (선택, 없으면 템플릿 이름 사용)
-    - custom_description: 커스텀 설명 (선택)
-    - custom_prompt: 커스텀 프롬프트 (선택)
-    """
+    """템플릿 기반 페르소나 생성"""
     template_name = request.data.get('template_name')
     
     if not template_name:
@@ -84,7 +96,6 @@ def create_persona_from_template(request):
             'error': 'template_name is required'
         }, status=status.HTTP_400_BAD_REQUEST)
     
-    # 템플릿 찾기
     template = next(
         (t for t in DEFAULT_PERSONA_TEMPLATES if t['name'] == template_name),
         None
@@ -95,7 +106,6 @@ def create_persona_from_template(request):
             'error': f'Template "{template_name}" not found'
         }, status=status.HTTP_404_NOT_FOUND)
     
-    # 커스텀 값 또는 템플릿 값 사용
     persona_data = {
         'name': request.data.get('custom_name', template['name']),
         'description': request.data.get('custom_description', template['description']),
@@ -108,7 +118,7 @@ def create_persona_from_template(request):
     if serializer.is_valid():
         persona = serializer.save(
             user=request.user,
-            is_default=False  # 사용자가 만든 건 커스텀
+            is_default=False
         )
         response_serializer = PersonaSerializer(persona)
         return Response({
@@ -122,30 +132,34 @@ def create_persona_from_template(request):
     }, status=status.HTTP_400_BAD_REQUEST)
 
 @extend_schema(
-    tags=['Users'],
-    summary='로그아웃',
-    description='현재 세션을 종료합니다.',
+    tags=['Personas'],
+    summary='페르소나 목록 조회 / 생성',
+    description='GET: 사용자의 페르소나 목록 조회, POST: 새 페르소나 생성',
+    parameters=[
+        OpenApiParameter('default_only', OpenApiTypes.BOOL, description='기본 페르소나만 조회'),
+        OpenApiParameter('custom_only', OpenApiTypes.BOOL, description='커스텀 페르소나만 조회'),
+        OpenApiParameter('active_only', OpenApiTypes.BOOL, description='활성화된 페르소나만 조회'),
+    ],
+    request=PersonaCreateSerializer,
+    responses={
+        200: PersonaSerializer(many=True),
+        201: PersonaSerializer,
+        400: OpenApiExample('Error', value={'errors': {}})
+    }
 )
 @api_view(['GET', 'POST'])
 @permission_classes([IsAuthenticated])
 def persona_list_create(request):
-    """
-    GET: 현재 유저의 모든 페르소나 조회
-    POST: 완전히 새로운 커스텀 페르소나 생성
-    """
+    """페르소나 목록 조회 및 생성"""
     if request.method == 'GET':
-        # 쿼리 파라미터로 필터링
         queryset = Persona.objects.filter(user=request.user)
         
-        # 기본 페르소나만
         if request.query_params.get('default_only') == 'true':
             queryset = queryset.filter(is_default=True)
         
-        # 커스텀 페르소나만
         if request.query_params.get('custom_only') == 'true':
             queryset = queryset.filter(is_default=False)
         
-        # 활성화된 것만
         if request.query_params.get('active_only') == 'true':
             queryset = queryset.filter(is_active=True)
         
@@ -161,7 +175,7 @@ def persona_list_create(request):
         if serializer.is_valid():
             persona = serializer.save(
                 user=request.user,
-                is_default=False  # 유저가 만든 건 항상 커스텀
+                is_default=False
             )
             response_serializer = PersonaSerializer(persona)
             return Response({
@@ -174,18 +188,21 @@ def persona_list_create(request):
         }, status=status.HTTP_400_BAD_REQUEST)
 
 @extend_schema(
-    tags=['Users'],
-    summary='내 정보 조회',
-    description='현재 로그인한 사용자의 정보를 조회합니다.',
+    tags=['Personas'],
+    summary='페르소나 상세 조회 / 수정 / 삭제',
+    description='GET: 조회, PUT/PATCH: 수정, DELETE: 삭제 (커스텀 페르소나만 가능)',
+    request=PersonaCreateSerializer,
+    responses={
+        200: PersonaSerializer,
+        204: OpenApiExample('Deleted', value={'message': 'Persona deleted successfully'}),
+        403: OpenApiExample('Forbidden', value={'error': 'Cannot modify default persona'}),
+        404: OpenApiExample('Not Found', value={'error': 'Persona not found'})
+    }
 )
 @api_view(['GET', 'PUT', 'PATCH', 'DELETE'])
 @permission_classes([IsAuthenticated])
 def persona_detail(request, pk):
-    """
-    GET: 특정 페르소나 조회
-    PUT/PATCH: 페르소나 수정 (커스텀 페르소나만 가능)
-    DELETE: 페르소나 삭제 (커스텀 페르소나만 가능)
-    """
+    """페르소나 상세 조회/수정/삭제"""
     try:
         persona = Persona.objects.get(pk=pk, user=request.user)
     except Persona.DoesNotExist:
@@ -198,7 +215,6 @@ def persona_detail(request, pk):
         return Response(serializer.data, status=status.HTTP_200_OK)
     
     elif request.method in ['PUT', 'PATCH']:
-        # 기본 페르소나는 수정 불가
         if persona.is_default:
             return Response({
                 'error': 'Cannot modify default persona. Create a custom copy instead.'
@@ -220,7 +236,6 @@ def persona_detail(request, pk):
         }, status=status.HTTP_400_BAD_REQUEST)
     
     elif request.method == 'DELETE':
-        # 기본 페르소나는 삭제 불가
         if persona.is_default:
             return Response({
                 'error': 'Cannot delete default persona'
@@ -232,21 +247,28 @@ def persona_detail(request, pk):
         }, status=status.HTTP_204_NO_CONTENT)
 
 @extend_schema(
-    tags=['Users'],
+    tags=['Personas'],
     summary='페르소나 복제',
-    description='기존 페르소나를 복제하여 새 페르소나를 생성합니다.',
+    description='기존 페르소나를 복제하여 새 커스텀 페르소나를 생성합니다.',
+    request={
+        'application/json': {
+            'type': 'object',
+            'properties': {
+                'custom_name': {'type': 'string', 'example': '복사된 페르소나'},
+                'custom_description': {'type': 'string'},
+                'custom_prompt': {'type': 'string'}
+            }
+        }
+    },
+    responses={
+        201: PersonaSerializer,
+        404: OpenApiExample('Not Found', value={'error': 'Persona not found'})
+    }
 )
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def duplicate_persona(request, pk):
-    """
-    페르소나 복제 (기본 페르소나를 커스텀으로 복사할 때 유용)
-    
-    요청 필드 (선택):
-    - custom_name: 새 이름
-    - custom_description: 새 설명
-    - custom_prompt: 새 프롬프트
-    """
+    """페르소나 복제"""
     try:
         original = Persona.objects.get(pk=pk, user=request.user)
     except Persona.DoesNotExist:
@@ -254,13 +276,12 @@ def duplicate_persona(request, pk):
             'error': 'Persona not found'
         }, status=status.HTTP_404_NOT_FOUND)
     
-    # 복제 생성
     duplicate = Persona.objects.create(
         user=request.user,
         name=request.data.get('custom_name', f"{original.name} (복사본)"),
         description=request.data.get('custom_description', original.description),
         prompt=request.data.get('custom_prompt', original.prompt),
-        is_default=False,  # 복사본은 항상 커스텀
+        is_default=False,
         is_active=True
     )
     
@@ -272,9 +293,13 @@ def duplicate_persona(request, pk):
     }, status=status.HTTP_201_CREATED)
 
 @extend_schema(
-    tags=['Users'],
+    tags=['Personas'],
     summary='페르소나 활성화/비활성화 토글',
     description='페르소나의 활성화 상태를 토글합니다.',
+    responses={
+        200: PersonaSerializer,
+        404: OpenApiExample('Not Found', value={'error': 'Persona not found'})
+    }
 )
 @api_view(['PATCH'])
 @permission_classes([IsAuthenticated])
@@ -296,11 +321,16 @@ def toggle_persona_active(request, pk):
         'persona': serializer.data
     }, status=status.HTTP_200_OK)
 
-# AI 면접 기능 (기존 코드 유지)
 @extend_schema(
-    tags=['Users'],
+    tags=['Personas'],
     summary='AI 면접관과 대화',
-    description='선택한 페르소나와 AI 면접관과 대화합니다.',
+    description='선택한 페르소나로 AI 면접관과 대화합니다.',
+    request=InterviewRequestSerializer,
+    responses={
+        200: InterviewResponseSerializer,
+        400: OpenApiExample('Error', value={'error': 'persona_id and message are required'}),
+        404: OpenApiExample('Not Found', value={'error': 'Persona not found'})
+    }
 )
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
@@ -322,7 +352,6 @@ def ai_interview(request):
             'error': 'Persona not found or you do not have permission'
         }, status=status.HTTP_404_NOT_FOUND)
     
-    # 비활성화된 페르소나 체크
     if not persona.is_active:
         return Response({
             'error': 'This persona is deactivated'
@@ -364,9 +393,15 @@ def ai_interview(request):
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 @extend_schema(
-    tags=['Users'],
+    tags=['Personas'],
     summary='페르소나 기반 면접 질문 생성',
-    description='선택한 페르소나를 기반으로 면접 질문을 생성합니다.',
+    description='선택한 페르소나를 기반으로 맞춤형 면접 질문을 생성합니다.',
+    request=QuestionGenerateRequestSerializer,
+    responses={
+        200: QuestionGenerateResponseSerializer,
+        400: OpenApiExample('Error', value={'error': 'persona_id is required'}),
+        404: OpenApiExample('Not Found', value={'error': 'Persona not found'})
+    }
 )
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])

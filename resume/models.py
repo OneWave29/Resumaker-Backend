@@ -14,7 +14,7 @@ class Resume(models.Model):
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
         related_name="resumes",
-        db_column="user_id",  # DB 컬럼명이 user_id라면
+        db_column="user_id",
     )
 
     # ERD에서 NULL 허용인데, 실제로 리스트로 쓰려면 default=list 추천

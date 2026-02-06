@@ -1,67 +1,79 @@
 from rest_framework import serializers
+from resume.models import Education, Award, Certification, WorkExperience
 from .models import Persona
 
+# --- 기초 데이터 시리얼라이저 ---
+class EducationSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Education
+        fields = ['id', 'university', 'major', 'enrollment_year', 'graduation_year', 'gpa']
+
+class AwardSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Award
+        fields = ['id', 'competition_name', 'award_title', 'award_year', 'awarding_organization']
+
+class CertificationSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Certification
+        fields = ['id', 'name', 'obtained_date', 'issuing_organization', 'score', 'grade']
+
+class WorkExperienceSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = WorkExperience
+        fields = ['id', 'company_name', 'start_year', 'end_year', 'job_title', 'job_description']
+
+# --- 통합 요청/응답 시리얼라이저 ---
+class MyPageResumeSerializer(serializers.Serializer):
+    educations = EducationSerializer(many=True, required=False)
+    awards = AwardSerializer(many=True, required=False)
+    certifications = CertificationSerializer(many=True, required=False)
+    work_experiences = WorkExperienceSerializer(many=True, required=False)
+
+class FileUploadSerializer(serializers.Serializer):
+    file = serializers.FileField(help_text="PDF 파일을 업로드하세요.")
+
+class ResumeIdSerializer(serializers.Serializer):
+    resume_id = serializers.IntegerField(help_text="생성된 이력서의 ID")
+
+class GeminiResponseSerializer(serializers.Serializer):
+    resume_id = serializers.IntegerField()
+    db_json = serializers.JSONField()
+
+# --- Persona 시리얼라이저 ---
 class PersonaSerializer(serializers.ModelSerializer):
-    user_id = serializers.IntegerField(source='user.id', read_only=True)
-    username = serializers.CharField(source='user.username', read_only=True)
-    
     class Meta:
         model = Persona
-        fields = (
-            'id',
-            'name',
-            'description',
-            'prompt',
-            'user_id',
-            'username',
-            'is_default',
-            'is_active',
-            'created_at',
-            'updated_at',
-        )
-        read_only_fields = ('id', 'user_id', 'username', 'is_default', 'created_at', 'updated_at')
-    
-    def validate_name(self, value):
-        """이름 유효성 검사"""
-        if not value or len(value.strip()) == 0:
-            raise serializers.ValidationError("Name cannot be empty.")
-        if len(value) > 50:
-            raise serializers.ValidationError("Name must be 50 characters or less.")
-        return value
-    
-    def validate_description(self, value):
-        """설명 유효성 검사"""
-        if not value or len(value.strip()) == 0:
-            raise serializers.ValidationError("Description cannot be empty.")
-        if len(value) > 200:
-            raise serializers.ValidationError("Description must be 200 characters or less.")
-        return value
-    
-    def validate_prompt(self, value):
-        """프롬프트 유효성 검사"""
-        if value and len(value) > 2000:
-            raise serializers.ValidationError("Prompt must be 2000 characters or less.")
-        return value
+        fields = '__all__'
 
 class PersonaCreateSerializer(serializers.ModelSerializer):
-    """페르소나 생성/수정용 Serializer"""
-    
     class Meta:
         model = Persona
-        fields = ('name', 'description', 'prompt', 'is_active')
-    
-    def validate_name(self, value):
-        if not value or len(value.strip()) == 0:
-            raise serializers.ValidationError("Name cannot be empty.")
-        return value
-    
-    def validate_description(self, value):
-        if not value or len(value.strip()) == 0:
-            raise serializers.ValidationError("Description cannot be empty.")
-        return value
+        fields = '__all__'
 
 class PersonaTemplateSerializer(serializers.Serializer):
-    """기본 템플릿 조회용 (DB 저장 X)"""
     name = serializers.CharField()
     description = serializers.CharField()
     prompt = serializers.CharField()
+
+class InterviewRequestSerializer(serializers.Serializer):
+    persona_id = serializers.IntegerField()
+    message = serializers.CharField()
+    conversation_history = serializers.ListField(required=False, default=list)
+
+class InterviewResponseSerializer(serializers.Serializer):
+    persona = PersonaSerializer()
+    user_message = serializers.CharField()
+    ai_response = serializers.CharField()
+    timestamp = serializers.DateTimeField()
+
+class QuestionGenerateRequestSerializer(serializers.Serializer):
+    persona_id = serializers.IntegerField()
+    job_position = serializers.CharField(required=False)
+    resume_summary = serializers.CharField(required=False)
+
+class QuestionGenerateResponseSerializer(serializers.Serializer):
+    persona = PersonaSerializer()
+    question = serializers.CharField()
+    job_position = serializers.CharField()
+    timestamp = serializers.DateTimeField()
