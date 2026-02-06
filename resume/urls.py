@@ -5,6 +5,7 @@ app_name = 'resume'
 
 urlpatterns = [
     path('parse-pdf/', views.parse_pdf, name='parse_pdf'),
+    path('mypage/', views.mypage_resume, name='mypage_resume'),
     path('create/', views.resume_create, name='resume_create'),
     path('<int:pk>/', views.resume_read, name='resume_read'),
     path('<int:pk>/update/', views.resume_update, name='resume_update'),
