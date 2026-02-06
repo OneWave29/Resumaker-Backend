@@ -41,3 +41,6 @@ typing_extensions==4.14.1
 # DB (SQLite / PostgreSQL 대비)
 # -------------------------
 psycopg2-binary==2.9.10
+
+# pypdf 임시로 김태우가 추가함
+pypdf==4.3.1
