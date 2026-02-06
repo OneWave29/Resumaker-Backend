@@ -2,7 +2,6 @@ from io import BytesIO
 from typing import Dict, Any, List
 
 from django.template.loader import render_to_string
-from weasyprint import HTML
 
 from resume.models import Resume, Element
 
@@ -75,6 +74,7 @@ def render_resume_pdf_from_db(user, resume_id: int) -> bytes:
 
 # (선택) 기존 JSON 기반 함수도 유지하고 싶으면 남겨둬도 됨
 def render_resume_pdf(resume_json: dict) -> bytes:
+    from weasyprint import HTML
     html_string = render_to_string("resume/resume_pdf.html", {"resume": resume_json})
     pdf_io = BytesIO()
     HTML(string=html_string).write_pdf(pdf_io)

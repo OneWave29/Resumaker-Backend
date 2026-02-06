@@ -14,7 +14,6 @@ import json
 from django.contrib.auth.decorators import login_required
 from .services.resume_context import build_db_context
 from .services.gemini_resume_writer import generate_resume_with_gemini
-from .services.resume_pdf import render_resume_pdf_from_db
 from .services.resume_save import save_resume_db_json
 
 from .services.gemini_resume_parser import (
@@ -75,7 +74,7 @@ def upload_test_page(request):
 
 @csrf_exempt  # MVP면 유지
 @require_POST
-@login_required
+#@login_required
 def generate_resume(request):
     # 1) 프론트 JSON 받기
     try:
@@ -117,6 +116,7 @@ def generate_resume(request):
 @require_POST
 @login_required
 def generate_resume_pdf(request):
+    from .services.resume_pdf import render_resume_pdf_from_db
     try:
         payload = json.loads(request.body.decode("utf-8") or "{}")
     except json.JSONDecodeError:
