@@ -1,72 +1,32 @@
-# =========================
 # Python
-# =========================
 __pycache__/
 *.py[cod]
 *$py.class
 *.so
 .Python
 
-# Virtual environment (DO NOT COMMIT)
-venv/
-.env
-.venv
-ENV/
-
-# =========================
 # Django
-# =========================
 *.log
 db.sqlite3
 db.sqlite3-journal
 media/
 staticfiles/
 
-# Django local settings
-settings_local.py
-.env.local
+# Environment
+.env
+.venv
+venv/
+ENV/
 
-# =========================
-# OS files
-# =========================
-# macOS
-.DS_Store
-
-# Windows
-Thumbs.db
-desktop.ini
-
-# =========================
-# IDE / Editor
-# =========================
-# VS Code
+# IDE
 .vscode/
-
-# PyCharm / IntelliJ
 .idea/
+*.swp
+*.swo
 
-# =========================
-# Build / cache
-# =========================
-.build/
-dist/
-*.egg-info/
+# OS
+.DS_Store
+Thumbs.db
 
-# =========================
-# Testing / Coverage
-# =========================
-.coverage
-htmlcov/
-pytest_cache/
-
-# =========================
-# Node (if used)
-# =========================
-node_modules/
-
-# =========================
-# Secrets
-# =========================
-*.pem
-*.key
-*.crt
+# Test files
+cookies.txt
