@@ -33,10 +33,10 @@ def login_view(request):
     serializer = UserLoginSerializer(data=request.data)
     
     if serializer.is_valid():
-        username = serializer.validated_data['username']
+        email = serializer.validated_data['email']
         password = serializer.validated_data['password']
         
-        user = authenticate(request, username=username, password=password)
+        user = authenticate(request, username=email, password=password)
         
         if user is not None:
             login(request, user)
@@ -44,7 +44,7 @@ def login_view(request):
                 'message': 'Login successful',
                 'user': {
                     'id': user.id,
-                    'username': user.username,
+                'username': user.username,
                     'email': user.email
                 }
             }, status=status.HTTP_200_OK)
