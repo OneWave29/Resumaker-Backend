@@ -53,3 +53,19 @@ class UserProfileUpdateSerializer(serializers.ModelSerializer):
             "job",
             "phone_number",
         ]
+
+
+class UserProfileReadSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = User
+        fields = [
+            "id",
+            "username",
+            "email",
+            "name",
+            "age",
+            "gender",
+            "job",
+            "phone_number",
+        ]
+        read_only_fields = fields

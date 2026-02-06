@@ -3,9 +3,17 @@ from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework import status
 from django.contrib.auth import authenticate, login, logout
+from resume.models import Award, Career, Certificate, Education
+from resume.serializers import (
+    AwardSerializer,
+    CareerSerializer,
+    CertificateSerializer,
+    EducationSerializer,
+)
 from .serializers import (
     UserRegistrationSerializer,
     UserLoginSerializer,
+    UserProfileReadSerializer,
     UserProfileUpdateSerializer,
 )
 
@@ -70,10 +78,30 @@ def logout_view(request):
     }, status=status.HTTP_200_OK)
 
 
-@api_view(["PATCH"])
+@api_view(["GET", "PATCH"])
 @permission_classes([IsAuthenticated])
 def update_profile(request):
     """마이페이지 정보 수정 API"""
+    if request.method == "GET":
+        return Response(
+            {
+                "user": UserProfileReadSerializer(request.user).data,
+                "educations": EducationSerializer(
+                    Education.objects.filter(user=request.user), many=True
+                ).data,
+                "awards": AwardSerializer(
+                    Award.objects.filter(user=request.user), many=True
+                ).data,
+                "certificates": CertificateSerializer(
+                    Certificate.objects.filter(user=request.user), many=True
+                ).data,
+                "careers": CareerSerializer(
+                    Career.objects.filter(user=request.user), many=True
+                ).data,
+            },
+            status=status.HTTP_200_OK,
+        )
+
     serializer = UserProfileUpdateSerializer(
         request.user, data=request.data, partial=True
     )
