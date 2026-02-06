@@ -3,6 +3,8 @@ from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.response import Response
 from rest_framework import status
+from drf_spectacular.utils import extend_schema, OpenApiParameter, OpenApiExample
+from drf_spectacular.types import OpenApiTypes
 from django.http import StreamingHttpResponse
 from django.utils import timezone
 from django.db.models import Q
@@ -39,6 +41,11 @@ DEFAULT_PERSONA_TEMPLATES = [
     }
 ]
 
+@extend_schema(
+    tags=['Users'],
+    summary='회원가입',
+    description='새로운 사용자를 생성합니다.',
+)
 @api_view(['GET'])
 @permission_classes([AllowAny])
 def persona_templates(request):
@@ -53,6 +60,11 @@ def persona_templates(request):
         'count': len(DEFAULT_PERSONA_TEMPLATES)
     }, status=status.HTTP_200_OK)
 
+@extend_schema(
+    tags=['Users'],
+    summary='로그인',
+    description='사용자 인증 및 세션 생성',
+)
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def create_persona_from_template(request):
@@ -109,6 +121,11 @@ def create_persona_from_template(request):
         'errors': serializer.errors
     }, status=status.HTTP_400_BAD_REQUEST)
 
+@extend_schema(
+    tags=['Users'],
+    summary='로그아웃',
+    description='현재 세션을 종료합니다.',
+)
 @api_view(['GET', 'POST'])
 @permission_classes([IsAuthenticated])
 def persona_list_create(request):
@@ -156,6 +173,11 @@ def persona_list_create(request):
             'errors': serializer.errors
         }, status=status.HTTP_400_BAD_REQUEST)
 
+@extend_schema(
+    tags=['Users'],
+    summary='내 정보 조회',
+    description='현재 로그인한 사용자의 정보를 조회합니다.',
+)
 @api_view(['GET', 'PUT', 'PATCH', 'DELETE'])
 @permission_classes([IsAuthenticated])
 def persona_detail(request, pk):
@@ -209,6 +231,11 @@ def persona_detail(request, pk):
             'message': 'Persona deleted successfully'
         }, status=status.HTTP_204_NO_CONTENT)
 
+@extend_schema(
+    tags=['Users'],
+    summary='페르소나 복제',
+    description='기존 페르소나를 복제하여 새 페르소나를 생성합니다.',
+)
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def duplicate_persona(request, pk):
@@ -244,6 +271,11 @@ def duplicate_persona(request, pk):
         'persona': serializer.data
     }, status=status.HTTP_201_CREATED)
 
+@extend_schema(
+    tags=['Users'],
+    summary='페르소나 활성화/비활성화 토글',
+    description='페르소나의 활성화 상태를 토글합니다.',
+)
 @api_view(['PATCH'])
 @permission_classes([IsAuthenticated])
 def toggle_persona_active(request, pk):
@@ -265,6 +297,11 @@ def toggle_persona_active(request, pk):
     }, status=status.HTTP_200_OK)
 
 # AI 면접 기능 (기존 코드 유지)
+@extend_schema(
+    tags=['Users'],
+    summary='AI 면접관과 대화',
+    description='선택한 페르소나와 AI 면접관과 대화합니다.',
+)
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def ai_interview(request):
@@ -326,6 +363,11 @@ def ai_interview(request):
             'error': f'Failed to get AI response: {str(e)}'
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
+@extend_schema(
+    tags=['Users'],
+    summary='페르소나 기반 면접 질문 생성',
+    description='선택한 페르소나를 기반으로 면접 질문을 생성합니다.',
+)
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def generate_interview_question(request):
