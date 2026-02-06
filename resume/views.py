@@ -1,4 +1,13 @@
 from django.http import JsonResponse, HttpResponse
+from django.db import transaction
+from django.utils.dateparse import parse_date
+from decimal import Decimal, InvalidOperation
+from rest_framework.decorators import api_view, permission_classes
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.response import Response
+from rest_framework import status
+
+from .models import Education, Award, Certification, WorkExperience
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST
 import json
@@ -144,3 +153,215 @@ def resume_update(request, resume_id):
 
 def resume_delete(request, resume_id):
     return JsonResponse({"message": f"TODO resume_delete {resume_id}"}, status=501)
+
+
+def _serialize_education(item):
+    return {
+        "id": item.id,
+        "university": item.university,
+        "major": item.major,
+        "enrollment_year": item.enrollment_year,
+        "graduation_year": item.graduation_year,
+        "gpa": item.gpa,
+    }
+
+
+def _serialize_award(item):
+    return {
+        "id": item.id,
+        "competition_name": item.competition_name,
+        "award_title": item.award_title,
+        "award_year": item.award_year,
+        "awarding_organization": item.awarding_organization,
+    }
+
+
+def _serialize_certification(item):
+    return {
+        "id": item.id,
+        "name": item.name,
+        "obtained_date": item.obtained_date.isoformat(),
+        "issuing_organization": item.issuing_organization,
+        "score": item.score,
+        "grade": item.grade,
+    }
+
+
+def _serialize_work_experience(item):
+    return {
+        "id": item.id,
+        "company_name": item.company_name,
+        "start_year": item.start_year,
+        "end_year": item.end_year,
+        "job_title": item.job_title,
+        "job_description": item.job_description,
+    }
+
+
+def _coerce_int(value, field_name):
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        raise ValueError(f"{field_name} must be an integer")
+
+
+def _coerce_int_optional(value, field_name):
+    if value in (None, ""):
+        return None
+    return _coerce_int(value, field_name)
+
+
+def _coerce_decimal_optional(value, field_name):
+    if value in (None, ""):
+        return None
+    try:
+        return Decimal(str(value))
+    except (InvalidOperation, ValueError):
+        raise ValueError(f"{field_name} must be a decimal number")
+
+
+def _coerce_text_optional(value):
+    if value in (None, ""):
+        return None
+    return value
+
+
+def _validate_required_fields(item, fields, section_name):
+    missing = [
+        field for field in fields if field not in item or item[field] in (None, "")
+    ]
+    if missing:
+        raise ValueError(f"{section_name} missing fields: {', '.join(missing)}")
+
+
+def _replace_items(
+    model,
+    user,
+    items,
+    required_fields,
+    optional_fields,
+    section_name,
+    normalizers=None,
+):
+    if normalizers is None:
+        normalizers = {}
+    if not isinstance(items, list):
+        raise ValueError(f"{section_name} must be a list")
+
+    model.objects.filter(user=user).delete()
+    new_items = []
+    for raw in items:
+        if not isinstance(raw, dict):
+            raise ValueError(f"{section_name} items must be objects")
+        _validate_required_fields(raw, required_fields, section_name)
+        payload = {}
+        for field in required_fields:
+            value = raw[field]
+            if field in normalizers:
+                value = normalizers[field](value)
+            payload[field] = value
+        for field in optional_fields:
+            if field in raw:
+                value = raw.get(field)
+                if field in normalizers:
+                    value = normalizers[field](value)
+                payload[field] = value
+        new_items.append(model(user=user, **payload))
+    model.objects.bulk_create(new_items)
+
+
+@api_view(["GET", "PUT"])
+@permission_classes([IsAuthenticated])
+def mypage_resume(request):
+    """
+    마이페이지 학력/수상/자격증/경력 일괄 조회 및 수정 (GET/PUT)
+
+    - GET: 현재 데이터를 조회합니다. 없으면 빈 배열을 반환합니다.
+    - PUT: body에 목록이 포함되면 해당 목록을 전체 교체합니다.
+      body가 비어 있으면 현재 데이터를 그대로 조회합니다.
+    """
+    user = request.user
+    payload = request.data or {}
+
+    sections = {
+        "educations": (
+            Education,
+            ["university", "major", "enrollment_year", "graduation_year"],
+            ["gpa"],
+            {
+                "enrollment_year": lambda v: _coerce_int(v, "enrollment_year"),
+                "graduation_year": lambda v: _coerce_int(v, "graduation_year"),
+                "gpa": lambda v: _coerce_decimal_optional(v, "gpa"),
+            },
+        ),
+        "awards": (
+            Award,
+            ["competition_name", "award_title", "award_year", "awarding_organization"],
+            [],
+            {
+                "award_year": lambda v: _coerce_int(v, "award_year"),
+            },
+        ),
+        "certifications": (
+            Certification,
+            ["name", "obtained_date", "issuing_organization"],
+            ["score", "grade"],
+            {
+                "obtained_date": lambda v: (
+                    parse_date(v)
+                    if parse_date(v)
+                    else (_ for _ in ()).throw(ValueError("obtained_date must be YYYY-MM-DD"))
+                ),
+                "score": lambda v: _coerce_int_optional(v, "score"),
+                "grade": _coerce_text_optional,
+            },
+        ),
+        "work_experiences": (
+            WorkExperience,
+            ["company_name", "start_year", "job_title", "job_description"],
+            ["end_year"],
+            {
+                "start_year": lambda v: _coerce_int(v, "start_year"),
+                "end_year": lambda v: _coerce_int_optional(v, "end_year"),
+            },
+        ),
+    }
+
+    if request.method == "PUT":
+        try:
+            with transaction.atomic():
+                for section_name, (model, required_fields, optional_fields, normalizers) in sections.items():
+                    if section_name in payload:
+                        _replace_items(
+                            model=model,
+                            user=user,
+                            items=payload.get(section_name, []),
+                            required_fields=required_fields,
+                            optional_fields=optional_fields,
+                            section_name=section_name,
+                            normalizers=normalizers,
+                        )
+        except ValueError as exc:
+            return Response({"error": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+
+    return Response(
+        {
+            "educations": [
+                _serialize_education(item)
+                for item in Education.objects.filter(user=user).order_by("id")
+            ],
+            "awards": [
+                _serialize_award(item)
+                for item in Award.objects.filter(user=user).order_by("id")
+            ],
+            "certifications": [
+                _serialize_certification(item)
+                for item in Certification.objects.filter(user=user).order_by("id")
+            ],
+            "work_experiences": [
+                _serialize_work_experience(item)
+                for item in WorkExperience.objects.filter(user=user).order_by("id")
+            ],
+        },
+        status=status.HTTP_200_OK,
+    )
