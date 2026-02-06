@@ -200,14 +200,15 @@ def _replace_items(
     model.objects.bulk_create(new_items)
 
 
-@api_view(["PUT"])
+@api_view(["GET", "PUT"])
 @permission_classes([IsAuthenticated])
 def mypage_resume(request):
     """
-    마이페이지 학력/수상/자격증/경력 일괄 조회 및 수정 (PUT)
+    마이페이지 학력/수상/자격증/경력 일괄 조회 및 수정 (GET/PUT)
 
-    - body에 목록이 포함되면 해당 목록을 전체 교체합니다.
-    - body가 비어 있으면 현재 데이터를 그대로 조회합니다.
+    - GET: 현재 데이터를 조회합니다. 없으면 빈 배열을 반환합니다.
+    - PUT: body에 목록이 포함되면 해당 목록을 전체 교체합니다.
+      body가 비어 있으면 현재 데이터를 그대로 조회합니다.
     """
     user = request.user
     payload = request.data or {}
@@ -256,21 +257,22 @@ def mypage_resume(request):
         ),
     }
 
-    try:
-        with transaction.atomic():
-            for section_name, (model, required_fields, optional_fields, normalizers) in sections.items():
-                if section_name in payload:
-                    _replace_items(
-                        model=model,
-                        user=user,
-                        items=payload.get(section_name, []),
-                        required_fields=required_fields,
-                        optional_fields=optional_fields,
-                        section_name=section_name,
-                        normalizers=normalizers,
-                    )
-    except ValueError as exc:
-        return Response({"error": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+    if request.method == "PUT":
+        try:
+            with transaction.atomic():
+                for section_name, (model, required_fields, optional_fields, normalizers) in sections.items():
+                    if section_name in payload:
+                        _replace_items(
+                            model=model,
+                            user=user,
+                            items=payload.get(section_name, []),
+                            required_fields=required_fields,
+                            optional_fields=optional_fields,
+                            section_name=section_name,
+                            normalizers=normalizers,
+                        )
+        except ValueError as exc:
+            return Response({"error": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
 
     return Response(
         {
