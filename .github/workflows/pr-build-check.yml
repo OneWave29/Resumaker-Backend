@@ -1,0 +1,41 @@
+name: PR Build/Push Check
+
+on:
+  pull_request:
+    branches:
+      - dev
+
+jobs:
+  build-push-check:
+    runs-on: ubuntu-latest
+    if: ${{ github.event.pull_request.head.repo.fork == false }}
+
+    env:
+      IMAGE_TAG: pr-${{ github.event.pull_request.number }}-${{ github.sha }}
+      GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+      APP_NAME: ${{ secrets.APP_NAME }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Authenticate to GCP
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Configure Docker for GCR
+        run: gcloud auth configure-docker gcr.io
+
+      - name: Build and push image
+        run: |
+          docker build -t gcr.io/${GCP_PROJECT_ID}/${APP_NAME}:${IMAGE_TAG} .
+          docker push gcr.io/${GCP_PROJECT_ID}/${APP_NAME}:${IMAGE_TAG}
+
+      - name: Pull and inspect image
+        run: |
+          docker pull gcr.io/${GCP_PROJECT_ID}/${APP_NAME}:${IMAGE_TAG}
+          docker image inspect gcr.io/${GCP_PROJECT_ID}/${APP_NAME}:${IMAGE_TAG} > /dev/null
