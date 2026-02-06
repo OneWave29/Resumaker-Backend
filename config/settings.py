@@ -10,6 +10,7 @@ For the full list of settings and their values, see
 https://docs.djangoproject.com/en/6.0/ref/settings/
 """
 
+from dotenv import load_dotenv
 from pathlib import Path
 import os
 from dotenv import load_dotenv
@@ -128,3 +129,7 @@ USE_TZ = True
 STATIC_URL = 'static/'
 
 AUTH_USER_MODEL = 'users.User'
+
+#.env 읽기
+load_dotenv()
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
