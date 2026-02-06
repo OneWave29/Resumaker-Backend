@@ -1,17 +1,13 @@
-#gemini가 준 json을 형태로 db에 저장하는 부분
 import os
 import json
 import re
 from typing import Dict, Any
+
 import google.generativeai as genai
 
 
 def _extract_json(text: str) -> Dict[str, Any]:
-    """
-    Gemini가 가끔 JSON 외 텍스트를 섞어 반환할 때를 대비해
-    가장 바깥 { ... } 블록을 추출해서 파싱한다.
-    """
-    text = text.strip()
+    text = (text or "").strip()
     try:
         return json.loads(text)
     except json.JSONDecodeError:
@@ -28,9 +24,9 @@ def generate_resume_with_gemini(context: Dict[str, Any]) -> Dict[str, Any]:
     if not api_key:
         raise RuntimeError("GEMINI_API_KEY is not set")
 
-    client = genai.Client(api_key=api_key)
+    # ✅ 구 SDK는 configure 방식
+    genai.configure(api_key=api_key)
 
-    # ✅ Gemini가 "DB 저장용 포맷"으로만 반환하도록 강제
     system = """
 너는 이력서 작성 전문가다.
 입력 JSON에는 두 영역이 있다.
@@ -43,15 +39,8 @@ def generate_resume_with_gemini(context: Dict[str, Any]) -> Dict[str, Any]:
 [DB 저장용 JSON 스키마]
 {
   "item_list": [
-    {
-      "type": "SIMPLE",
-      "content": "string"
-    },
-    {
-      "type": "TITLED",
-      "sub_title": "string",
-      "content": "string"
-    }
+    {"type": "SIMPLE", "content": "string"},
+    {"type": "TITLED", "sub_title": "string", "content": "string"}
   ]
 }
 
@@ -62,36 +51,39 @@ def generate_resume_with_gemini(context: Dict[str, Any]) -> Dict[str, Any]:
 4) SIMPLE은 content만 포함한다. (sub_title 금지)
 5) TITLED는 sub_title + content를 포함한다.
 6) 프로젝트/경력/수상/학력/자격증 등은 적절히 TITLED 또는 SIMPLE로 구성해라.
-   - 예: 프로젝트/경력은 TITLED 권장 (sub_title=프로젝트명/회사명-직무 등)
-   - 예: 요약/협업스타일/미래목표 등은 SIMPLE 권장
 7) content에는 사람이 읽을 수 있도록 줄바꿈과 불릿(-)을 사용해도 된다.
-"""
+""".strip()
 
-    user = {
+    user_payload = {
         "instruction": "다음 context JSON을 기반으로 이력서를 DB 저장용 JSON으로 생성해줘.",
         "context": context,
-        # ✅ 출력 예시를 주면 형식을 더 잘 맞춤
         "output_example": {
             "item_list": [
                 {"type": "SIMPLE", "content": "헤드라인\n백엔드 개발자 ..."},
-                {"type": "TITLED", "sub_title": "프로젝트: AI 이력서 생성 서비스", "content": "기간: 2024-01 ~ 2024-02\n기술: Django, ...\n- ...\n- ..."}
+                {
+                    "type": "TITLED",
+                    "sub_title": "프로젝트: AI 이력서 생성 서비스",
+                    "content": "기간: 2024-01 ~ 2024-02\n기술: Django, ...\n- ...\n- ...",
+                },
             ]
-        }
+        },
     }
 
-    resp = client.models.generate_content(
-        model="gemini-1.5-pro",
-        contents=[
-            {
-                "role": "user",
-                "parts": [{"text": system + "\n\n" + json.dumps(user, ensure_ascii=False)}],
-            }
-        ],
-        config={
-            "temperature": 0.4,
-            "response_mime_type": "application/json",
-        },
+    prompt = system + "\n\n" + json.dumps(user_payload, ensure_ascii=False)
+
+    # ✅ 구 SDK는 GenerativeModel 사용
+    model = genai.GenerativeModel("gemini-1.5-pro")
+
+    # ✅ response_mime_type 같은 config는 구 SDK에서 지원이 제한적이라
+    #    최대한 "JSON만 출력"을 프롬프트로 강하게 강제하고,
+    #    결과는 _extract_json으로 안전 파싱한다.
+    resp = model.generate_content(
+        prompt,
+        generation_config=genai.types.GenerationConfig(
+            temperature=0.4,
+        ),
     )
 
-    # ✅ 안전 파싱
-    return _extract_json(resp.text)
+    # 구 SDK 응답 텍스트
+    text = getattr(resp, "text", "") or ""
+    return _extract_json(text)
