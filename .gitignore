@@ -3,13 +3,15 @@
 # =========================
 __pycache__/
 *.py[cod]
-*.pyo
-*.pyd
+*$py.class
+*.so
+.Python
 
 # Virtual environment (DO NOT COMMIT)
 venv/
 .env
-.venv/
+.venv
+ENV/
 
 # =========================
 # Django
