@@ -10,15 +10,12 @@ For the full list of settings and their values, see
 https://docs.djangoproject.com/en/6.0/ref/settings/
 """
 
-from dotenv import load_dotenv
 from pathlib import Path
 import os
 from dotenv import load_dotenv
 
 # .env 파일 로드
 load_dotenv()
-
-BASE_DIR = Path(__file__).resolve().parent.parent
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -170,11 +167,10 @@ USE_TZ = True
 
 STATIC_URL = 'static/'
 
-AUTH_USER_MODEL = 'users.User'
+# Default primary key field type
+DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
-#.env 읽기
-load_dotenv()
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+AUTH_USER_MODEL = 'users.User'
 
 # HTTPS / Proxy settings
 SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
