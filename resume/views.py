@@ -74,7 +74,7 @@ def upload_test_page(request):
 
 @csrf_exempt  # MVP면 유지
 @require_POST
-#@login_required
+@login_required
 def generate_resume(request):
     # 1) 프론트 JSON 받기
     try:
