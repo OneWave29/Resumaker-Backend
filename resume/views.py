@@ -22,6 +22,70 @@ from .services.gemini_resume_parser import (
     parse_resume_with_gemini,
 )
 
+from django.shortcuts import get_object_or_404
+from django.utils import timezone
+
+from resume.models import Resume, Element  # 이미 import되어 있으면 생략
+
+
+def _serialize_resume_summary(resume: Resume) -> dict:
+    """리스트용(가볍게)"""
+    return {
+        "resume_id": resume.id,
+        "created_at": resume.created_at.isoformat(),
+        "updated_at": resume.updated_at.isoformat(),
+        "item_count": len(resume.item_list or []),
+    }
+
+
+def _serialize_resume_detail(resume: Resume) -> dict:
+    """read용(상세) - item_list 순서대로 items 뽑기"""
+    order_ids = resume.item_list or []
+    if not order_ids:
+        order_ids = list(resume.elements.values_list("id", flat=True).order_by("id"))
+
+    elements = (
+        Element.objects.filter(resume=resume, id__in=order_ids)
+        .select_related("simple_content", "titled_content")
+    )
+    by_id = {e.id: e for e in elements}
+
+    items = []
+    for eid in order_ids:
+        e = by_id.get(eid)
+        if not e:
+            continue
+
+        if e.type == Element.ElementType.SIMPLE:
+            c = getattr(e, "simple_content", None)
+            items.append({
+                "element_id": e.id,
+                "type": "SIMPLE",
+                "sub_title": None,
+                "content": (getattr(c, "content", "") if c else ""),
+            })
+        else:  # TITLED
+            t = getattr(e, "titled_content", None)
+            items.append({
+                "element_id": e.id,
+                "type": "TITLED",
+                "sub_title": (getattr(t, "sub_title", "") if t else ""),
+                "content": (getattr(t, "content", "") if t else ""),
+            })
+
+    return {
+        "resume_id": resume.id,
+        "created_at": resume.created_at.isoformat(),
+        "updated_at": resume.updated_at.isoformat(),
+        "item_list": order_ids,   # 순서(요소 id들)
+        "items": items,           # 화면 표시용
+    }
+
+
+
+
+
+
 # =========================
 # API: PDF 업로드 → JSON 반환
 # POST /resume/parse-pdf/
@@ -145,20 +209,95 @@ def generate_resume_pdf(request):
 # =========================
 # TODO: Resume CRUD (나중에 구현)
 # =========================
+
+from django.db import transaction
+from resume.models import Element, Content, ContentSubtitle
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
 def resume_list(request):
-    return JsonResponse({"message": "TODO resume_list"}, status=501)
+    """
+    GET /api/resume/list/
+    내 이력서 목록(요약)
+    """
+    qs = Resume.objects.filter(user=request.user).order_by("-updated_at")
+    data = [_serialize_resume_summary(r) for r in qs]
+    return Response({"results": data}, status=status.HTTP_200_OK)
 
 def resume_create(request):
     return JsonResponse({"message": "TODO resume_create"}, status=501)
 
-def resume_read(request, resume_id):
-    return JsonResponse({"message": f"TODO resume_read {resume_id}"}, status=501)
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def resume_read(request, resume_id: int):
+    """
+    GET /api/resume/<resume_id>/
+    내 이력서 상세
+    """
+    resume = get_object_or_404(Resume, id=resume_id, user=request.user)
+    return Response(_serialize_resume_detail(resume), status=status.HTTP_200_OK)
 
-def resume_update(request, resume_id):
-    return JsonResponse({"message": f"TODO resume_update {resume_id}"}, status=501)
+@api_view(["PUT"])
+@permission_classes([IsAuthenticated])
+@transaction.atomic
+def resume_update(request, resume_id: int):
+    """
+    PUT /api/resume/<resume_id>/
+    body 예시:
+    {
+      "item_list": [
+        {"type":"SIMPLE","content":"..."},
+        {"type":"TITLED","sub_title":"...","content":"..."}
+      ]
+    }
+    -> 기존 elements 싹 지우고 재생성(가장 단순/안전)
+    """
+    resume = get_object_or_404(Resume, id=resume_id, user=request.user)
+    body = request.data or {}
+    items = body.get("item_list")
 
-def resume_delete(request, resume_id):
-    return JsonResponse({"message": f"TODO resume_delete {resume_id}"}, status=501)
+    if not isinstance(items, list):
+        return Response({"error": "item_list must be a list"}, status=400)
+
+    # 기존 요소 삭제(연결된 content들도 cascade)
+    resume.elements.all().delete()
+
+    new_order = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        t = item.get("type")
+        if t not in (Element.ElementType.SIMPLE, Element.ElementType.TITLED):
+            return Response({"error": f"Invalid type: {t}"}, status=400)
+
+        el = Element.objects.create(resume=resume, type=t)
+        new_order.append(el.id)
+
+        if t == Element.ElementType.SIMPLE:
+            Content.objects.create(element=el, content=item.get("content", "") or "")
+        else:
+            ContentSubtitle.objects.create(
+                element=el,
+                sub_title=item.get("sub_title", "") or "",
+                content=item.get("content", "") or "",
+            )
+
+    resume.item_list = new_order
+    resume.updated_at = timezone.now()
+    resume.save(update_fields=["item_list", "updated_at"])
+
+    return Response(_serialize_resume_detail(resume), status=200)
+
+
+@api_view(["DELETE"])
+@permission_classes([IsAuthenticated])
+def resume_delete(request, resume_id: int):
+    """
+    DELETE /api/resume/<resume_id>/
+    """
+    resume = get_object_or_404(Resume, id=resume_id, user=request.user)
+    resume.delete()
+    return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 def _serialize_education(item):
