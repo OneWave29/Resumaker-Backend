@@ -37,7 +37,7 @@ flatbuffers==25.12.19
 fonttools==4.61.1
 frozenlist==1.8.0
 fsspec==2026.1.0
-google-genai
+google-genai==1.62.0
 google-api-core==2.29.0
 google-api-python-client==2.189.0
 google-auth==2.47.0
@@ -46,11 +46,7 @@ googleapis-common-protos==1.72.0
 greenlet==3.2.3
 grpcio==1.74.0
 grpcio-status==1.71.2
-<<<<<<< HEAD
 gunicorn==21.2.0
-=======
-gunicorn==23.0.0
->>>>>>> 4f88acd (feat: 백엔드 서버 배포)
 h11==0.16.0
 h2==4.2.0
 hpack==4.1.0
@@ -144,7 +140,7 @@ python-dateutil==2.9.0.post0
 python-decouple==3.8
 python-dotenv==1.1.1
 pytz==2025.2
-pywin32==311
+pywin32==311; platform_system=="Windows"
 PyYAML==6.0.2
 qdrant-client==1.15.1
 referencing==0.37.0
