@@ -47,15 +47,7 @@ googleapis-common-protos==1.72.0
 greenlet==3.2.3
 grpcio==1.74.0
 grpcio-status==1.71.2
-<<<<<<< HEAD
-<<<<<<< HEAD
-gunicorn==21.2.0
-=======
 gunicorn==23.0.0
->>>>>>> 4f88acd (feat: 백엔드 서버 배포)
-=======
-gunicorn==23.0.0
->>>>>>> origin/deploy
 h11==0.16.0
 h2==4.2.0
 hpack==4.1.0
