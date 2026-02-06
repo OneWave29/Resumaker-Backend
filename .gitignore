@@ -30,3 +30,6 @@ Thumbs.db
 
 # Test files
 cookies.txt
+
+# local test payloads
+payload.json
