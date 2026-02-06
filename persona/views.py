@@ -5,31 +5,150 @@ from rest_framework.response import Response
 from rest_framework import status
 from django.http import StreamingHttpResponse
 from django.utils import timezone
+from django.db.models import Q
 from .models import Persona
-from .serializers import PersonaSerializer, PersonaCreateSerializer
+from .serializers import (
+    PersonaSerializer, 
+    PersonaCreateSerializer,
+    PersonaTemplateSerializer
+)
 from .gemini_utils import get_gemini_response, get_gemini_streaming_response
 import json
+
+# 기본 제공 페르소나 템플릿
+DEFAULT_PERSONA_TEMPLATES = [
+    {
+        'name': '데이터 분석가',
+        'description': '정확한 수치와 데이터 근거를 중시하며 논리적인 비약이 없는지 체크',
+        'prompt': '당신은 데이터 분석가 면접관입니다. 지원자의 답변에서 구체적인 수치, 데이터 근거, 논리적 일관성을 중점적으로 평가하세요. 모호한 표현이나 근거 없는 주장에 대해서는 반드시 추가 질문을 통해 명확히 하세요.',
+    },
+    {
+        'name': '정통 대기업 임원',
+        'description': '지원자의 말투, 태도, 기술 스택, 학력 등 기본기를 가장 중요하게 평가',
+        'prompt': '당신은 전통적인 대기업의 임원 면접관입니다. 지원자의 예의바른 태도, 정확한 언어 사용, 체계적인 학력 및 경력, 검증된 기술 스택을 중시하세요. 기본에 충실한 인재를 선호하며, 안정적이고 신뢰할 수 있는 답변을 높이 평가합니다.',
+    },
+    {
+        'name': '스타트업 CEO',
+        'description': '기존의 틀을 깨는 혁신적인 사고와 빠른 실행력을 가진 인재를 선호',
+        'prompt': '당신은 혁신적인 스타트업의 CEO 면접관입니다. 기존 관습에 도전하는 창의적 사고, 빠른 의사결정과 실행력, 실패에서 배우는 자세를 중시하세요. 학력이나 경력보다는 문제 해결 능력과 성장 가능성에 주목하세요.',
+    },
+    {
+        'name': '효율 중시형',
+        'description': '불필요한 수식어 없이 핵심만 담은 짧고 명확한 답변을 선호',
+        'prompt': '당신은 효율성을 최우선으로 하는 면접관입니다. 지원자가 핵심을 간결하게 전달하는지 평가하세요. 장황한 설명이나 불필요한 수식어는 감점 요소입니다. STAR 기법처럼 구조화되고 명확한 답변을 선호합니다.',
+    }
+]
+
+@api_view(['GET'])
+@permission_classes([AllowAny])
+def persona_templates(request):
+    """
+    기본 제공 페르소나 템플릿 조회
+    
+    사용자는 이 템플릿을 기반으로 자신만의 페르소나를 생성할 수 있음
+    """
+    serializer = PersonaTemplateSerializer(DEFAULT_PERSONA_TEMPLATES, many=True)
+    return Response({
+        'templates': serializer.data,
+        'count': len(DEFAULT_PERSONA_TEMPLATES)
+    }, status=status.HTTP_200_OK)
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def create_persona_from_template(request):
+    """
+    템플릿 기반 페르소나 생성
+    
+    요청 필드:
+    - template_name: 템플릿 이름 (필수)
+    - custom_name: 커스텀 이름 (선택, 없으면 템플릿 이름 사용)
+    - custom_description: 커스텀 설명 (선택)
+    - custom_prompt: 커스텀 프롬프트 (선택)
+    """
+    template_name = request.data.get('template_name')
+    
+    if not template_name:
+        return Response({
+            'error': 'template_name is required'
+        }, status=status.HTTP_400_BAD_REQUEST)
+    
+    # 템플릿 찾기
+    template = next(
+        (t for t in DEFAULT_PERSONA_TEMPLATES if t['name'] == template_name),
+        None
+    )
+    
+    if not template:
+        return Response({
+            'error': f'Template "{template_name}" not found'
+        }, status=status.HTTP_404_NOT_FOUND)
+    
+    # 커스텀 값 또는 템플릿 값 사용
+    persona_data = {
+        'name': request.data.get('custom_name', template['name']),
+        'description': request.data.get('custom_description', template['description']),
+        'prompt': request.data.get('custom_prompt', template['prompt']),
+        'is_active': True
+    }
+    
+    serializer = PersonaCreateSerializer(data=persona_data)
+    
+    if serializer.is_valid():
+        persona = serializer.save(
+            user=request.user,
+            is_default=False  # 사용자가 만든 건 커스텀
+        )
+        response_serializer = PersonaSerializer(persona)
+        return Response({
+            'message': 'Persona created from template successfully',
+            'persona': response_serializer.data,
+            'based_on_template': template_name
+        }, status=status.HTTP_201_CREATED)
+    
+    return Response({
+        'errors': serializer.errors
+    }, status=status.HTTP_400_BAD_REQUEST)
 
 @api_view(['GET', 'POST'])
 @permission_classes([IsAuthenticated])
 def persona_list_create(request):
     """
     GET: 현재 유저의 모든 페르소나 조회
-    POST: 새 페르소나 생성
+    POST: 완전히 새로운 커스텀 페르소나 생성
     """
     if request.method == 'GET':
-        personas = Persona.objects.filter(user=request.user)
-        serializer = PersonaSerializer(personas, many=True)
-        return Response(serializer.data, status=status.HTTP_200_OK)
+        # 쿼리 파라미터로 필터링
+        queryset = Persona.objects.filter(user=request.user)
+        
+        # 기본 페르소나만
+        if request.query_params.get('default_only') == 'true':
+            queryset = queryset.filter(is_default=True)
+        
+        # 커스텀 페르소나만
+        if request.query_params.get('custom_only') == 'true':
+            queryset = queryset.filter(is_default=False)
+        
+        # 활성화된 것만
+        if request.query_params.get('active_only') == 'true':
+            queryset = queryset.filter(is_active=True)
+        
+        serializer = PersonaSerializer(queryset, many=True)
+        return Response({
+            'personas': serializer.data,
+            'count': len(serializer.data)
+        }, status=status.HTTP_200_OK)
     
     elif request.method == 'POST':
         serializer = PersonaCreateSerializer(data=request.data)
         
         if serializer.is_valid():
-            persona = serializer.save(user=request.user)
+            persona = serializer.save(
+                user=request.user,
+                is_default=False  # 유저가 만든 건 항상 커스텀
+            )
             response_serializer = PersonaSerializer(persona)
             return Response({
-                'message': 'Persona created successfully',
+                'message': 'Custom persona created successfully',
                 'persona': response_serializer.data
             }, status=status.HTTP_201_CREATED)
         
@@ -37,13 +156,13 @@ def persona_list_create(request):
             'errors': serializer.errors
         }, status=status.HTTP_400_BAD_REQUEST)
 
-@api_view(['GET', 'PUT', 'DELETE'])
+@api_view(['GET', 'PUT', 'PATCH', 'DELETE'])
 @permission_classes([IsAuthenticated])
 def persona_detail(request, pk):
     """
     GET: 특정 페르소나 조회
-    PUT: 페르소나 수정
-    DELETE: 페르소나 삭제
+    PUT/PATCH: 페르소나 수정 (커스텀 페르소나만 가능)
+    DELETE: 페르소나 삭제 (커스텀 페르소나만 가능)
     """
     try:
         persona = Persona.objects.get(pk=pk, user=request.user)
@@ -56,8 +175,15 @@ def persona_detail(request, pk):
         serializer = PersonaSerializer(persona)
         return Response(serializer.data, status=status.HTTP_200_OK)
     
-    elif request.method == 'PUT':
-        serializer = PersonaCreateSerializer(persona, data=request.data, partial=True)
+    elif request.method in ['PUT', 'PATCH']:
+        # 기본 페르소나는 수정 불가
+        if persona.is_default:
+            return Response({
+                'error': 'Cannot modify default persona. Create a custom copy instead.'
+            }, status=status.HTTP_403_FORBIDDEN)
+        
+        partial = request.method == 'PATCH'
+        serializer = PersonaCreateSerializer(persona, data=request.data, partial=partial)
         
         if serializer.is_valid():
             serializer.save()
@@ -72,66 +198,86 @@ def persona_detail(request, pk):
         }, status=status.HTTP_400_BAD_REQUEST)
     
     elif request.method == 'DELETE':
+        # 기본 페르소나는 삭제 불가
+        if persona.is_default:
+            return Response({
+                'error': 'Cannot delete default persona'
+            }, status=status.HTTP_403_FORBIDDEN)
+        
         persona.delete()
         return Response({
             'message': 'Persona deleted successfully'
         }, status=status.HTTP_204_NO_CONTENT)
 
-@api_view(['GET'])
-@permission_classes([AllowAny])
-def default_personas(request):
-    """기본 제공 페르소나 4종 조회"""
-    default_personas_data = [
-        {
-            'name': '데이터 분석가',
-            'description': '정확한 수치와 데이터 근거를 중시하며 논리적인 비약이 없는지 체크',
-            'prompt': '당신은 데이터 분석가 면접관입니다. 지원자의 답변에서 구체적인 수치, 데이터 근거, 논리적 일관성을 중점적으로 평가하세요. 모호한 표현이나 근거 없는 주장에 대해서는 반드시 추가 질문을 통해 명확히 하세요.',
-        },
-        {
-            'name': '정통 대기업 임원',
-            'description': '지원자의 말투, 태도, 기술 스택, 학력 등 기본기를 가장 중요하게 평가',
-            'prompt': '당신은 전통적인 대기업의 임원 면접관입니다. 지원자의 예의바른 태도, 정확한 언어 사용, 체계적인 학력 및 경력, 검증된 기술 스택을 중시하세요. 기본에 충실한 인재를 선호하며, 안정적이고 신뢰할 수 있는 답변을 높이 평가합니다.',
-        },
-        {
-            'name': '스타트업 CEO',
-            'description': '기존의 틀을 깨는 혁신적인 사고와 빠른 실행력을 가진 인재를 선호',
-            'prompt': '당신은 혁신적인 스타트업의 CEO 면접관입니다. 기존 관습에 도전하는 창의적 사고, 빠른 의사결정과 실행력, 실패에서 배우는 자세를 중시하세요. 학력이나 경력보다는 문제 해결 능력과 성장 가능성에 주목하세요.',
-        },
-        {
-            'name': '효율 중시형',
-            'description': '불필요한 수식어 없이 핵심만 담은 짧고 명확한 답변을 선호',
-            'prompt': '당신은 효율성을 최우선으로 하는 면접관입니다. 지원자가 핵심을 간결하게 전달하는지 평가하세요. 장황한 설명이나 불필요한 수식어는 감점 요소입니다. STAR 기법처럼 구조화되고 명확한 답변을 선호합니다.',
-        }
-    ]
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def duplicate_persona(request, pk):
+    """
+    페르소나 복제 (기본 페르소나를 커스텀으로 복사할 때 유용)
     
-    return Response(default_personas_data, status=status.HTTP_200_OK)
+    요청 필드 (선택):
+    - custom_name: 새 이름
+    - custom_description: 새 설명
+    - custom_prompt: 새 프롬프트
+    """
+    try:
+        original = Persona.objects.get(pk=pk, user=request.user)
+    except Persona.DoesNotExist:
+        return Response({
+            'error': 'Persona not found'
+        }, status=status.HTTP_404_NOT_FOUND)
+    
+    # 복제 생성
+    duplicate = Persona.objects.create(
+        user=request.user,
+        name=request.data.get('custom_name', f"{original.name} (복사본)"),
+        description=request.data.get('custom_description', original.description),
+        prompt=request.data.get('custom_prompt', original.prompt),
+        is_default=False,  # 복사본은 항상 커스텀
+        is_active=True
+    )
+    
+    serializer = PersonaSerializer(duplicate)
+    return Response({
+        'message': 'Persona duplicated successfully',
+        'original_id': original.id,
+        'persona': serializer.data
+    }, status=status.HTTP_201_CREATED)
 
+@api_view(['PATCH'])
+@permission_classes([IsAuthenticated])
+def toggle_persona_active(request, pk):
+    """페르소나 활성화/비활성화 토글"""
+    try:
+        persona = Persona.objects.get(pk=pk, user=request.user)
+    except Persona.DoesNotExist:
+        return Response({
+            'error': 'Persona not found'
+        }, status=status.HTTP_404_NOT_FOUND)
+    
+    persona.is_active = not persona.is_active
+    persona.save()
+    
+    serializer = PersonaSerializer(persona)
+    return Response({
+        'message': f'Persona {"activated" if persona.is_active else "deactivated"}',
+        'persona': serializer.data
+    }, status=status.HTTP_200_OK)
+
+# AI 면접 기능 (기존 코드 유지)
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def ai_interview(request):
-    """
-    Gemini를 사용한 AI 면접관과 대화
-    
-    요청 필드:
-    - persona_id: 사용할 페르소나 ID (필수)
-    - message: 사용자 메시지 (필수)
-    - conversation_history: 이전 대화 내역 (선택)
-      [
-        {"role": "user", "parts": ["메시지"]},
-        {"role": "model", "parts": ["응답"]}
-      ]
-    """
+    """AI 면접관과 대화"""
     persona_id = request.data.get('persona_id')
     user_message = request.data.get('message')
     conversation_history = request.data.get('conversation_history', [])
     
-    # 필수 필드 검증
     if not persona_id or not user_message:
         return Response({
             'error': 'persona_id and message are required'
         }, status=status.HTTP_400_BAD_REQUEST)
     
-    # 페르소나 조회
     try:
         persona = Persona.objects.get(pk=persona_id, user=request.user)
     except Persona.DoesNotExist:
@@ -139,8 +285,13 @@ def ai_interview(request):
             'error': 'Persona not found or you do not have permission'
         }, status=status.HTTP_404_NOT_FOUND)
     
+    # 비활성화된 페르소나 체크
+    if not persona.is_active:
+        return Response({
+            'error': 'This persona is deactivated'
+        }, status=status.HTTP_400_BAD_REQUEST)
+    
     try:
-        # 시스템 프롬프트 설정
         system_prompt = persona.prompt or f"""
 당신은 '{persona.name}' 페르소나의 면접관입니다.
 설명: {persona.description}
@@ -148,7 +299,6 @@ def ai_interview(request):
 면접관으로서 지원자의 답변을 평가하고, 적절한 후속 질문을 하세요.
 """
         
-        # Gemini로부터 응답 받기
         ai_response = get_gemini_response(
             persona_prompt=system_prompt,
             user_message=user_message,
@@ -159,7 +309,8 @@ def ai_interview(request):
             'persona': {
                 'id': persona.id,
                 'name': persona.name,
-                'description': persona.description
+                'description': persona.description,
+                'is_default': persona.is_default
             },
             'user_message': user_message,
             'ai_response': ai_response,
@@ -177,69 +328,8 @@ def ai_interview(request):
 
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
-def ai_interview_stream(request):
-    """
-    Gemini를 사용한 AI 면접 (스트리밍 응답)
-    
-    Server-Sent Events (SSE) 방식으로 실시간 응답 전달
-    """
-    persona_id = request.data.get('persona_id')
-    user_message = request.data.get('message')
-    conversation_history = request.data.get('conversation_history', [])
-    
-    if not persona_id or not user_message:
-        return Response({
-            'error': 'persona_id and message are required'
-        }, status=status.HTTP_400_BAD_REQUEST)
-    
-    try:
-        persona = Persona.objects.get(pk=persona_id, user=request.user)
-    except Persona.DoesNotExist:
-        return Response({
-            'error': 'Persona not found'
-        }, status=status.HTTP_404_NOT_FOUND)
-    
-    def stream_response():
-        """스트리밍 응답 생성"""
-        try:
-            system_prompt = persona.prompt or f"""
-당신은 '{persona.name}' 페르소나의 면접관입니다.
-설명: {persona.description}
-"""
-            
-            for chunk in get_gemini_streaming_response(
-                persona_prompt=system_prompt,
-                user_message=user_message,
-                conversation_history=conversation_history
-            ):
-                yield f"data: {json.dumps({'chunk': chunk, 'done': False}, ensure_ascii=False)}\n\n"
-            
-            # 완료 신호
-            yield f"data: {json.dumps({'done': True}, ensure_ascii=False)}\n\n"
-                
-        except Exception as e:
-            yield f"data: {json.dumps({'error': str(e), 'done': True}, ensure_ascii=False)}\n\n"
-    
-    response = StreamingHttpResponse(
-        stream_response(),
-        content_type='text/event-stream'
-    )
-    response['Cache-Control'] = 'no-cache'
-    response['X-Accel-Buffering'] = 'no'
-    
-    return response
-
-@api_view(['POST'])
-@permission_classes([IsAuthenticated])
 def generate_interview_question(request):
-    """
-    페르소나 기반 면접 질문 생성
-    
-    요청 필드:
-    - persona_id: 사용할 페르소나 ID (필수)
-    - job_position: 지원 직무 (선택)
-    - resume_summary: 이력서 요약 (선택)
-    """
+    """페르소나 기반 면접 질문 생성"""
     persona_id = request.data.get('persona_id')
     job_position = request.data.get('job_position', '지원 직무')
     resume_summary = request.data.get('resume_summary', '')
@@ -256,8 +346,12 @@ def generate_interview_question(request):
             'error': 'Persona not found'
         }, status=status.HTTP_404_NOT_FOUND)
     
+    if not persona.is_active:
+        return Response({
+            'error': 'This persona is deactivated'
+        }, status=status.HTTP_400_BAD_REQUEST)
+    
     try:
-        # 질문 생성용 프롬프트
         system_prompt = f"""
 당신은 '{persona.name}' 페르소나의 면접관입니다.
 설명: {persona.description}
