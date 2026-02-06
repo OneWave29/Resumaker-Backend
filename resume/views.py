@@ -1,6 +1,12 @@
 from django.http import JsonResponse, HttpResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST
+import json
+from django.contrib.auth.decorators import login_required
+from .services.resume_context import build_db_context
+from .services.gemini_resume_writer import generate_resume_with_gemini
+from .services.resume_pdf import render_resume_pdf_from_db
+from .services.resume_save import save_resume_db_json
 
 from .services.gemini_resume_parser import (
     extract_text_from_pdf,
@@ -55,6 +61,70 @@ def upload_test_page(request):
     </html>
     """
     return HttpResponse(html)
+
+# ...
+
+@csrf_exempt  # MVP면 유지
+@require_POST
+@login_required
+def generate_resume(request):
+    # 1) 프론트 JSON 받기
+    try:
+        frontend_payload = json.loads(request.body.decode("utf-8") or "{}")
+    except json.JSONDecodeError:
+        return JsonResponse({"error": "Invalid JSON"}, status=400)
+
+    # 2) DB 컨텍스트 만들기
+    db_payload = build_db_context(request.user)
+
+    # 3) Gemini에 넘길 context
+    context = {
+        "frontend": frontend_payload,
+        "db": db_payload,
+    }
+
+    # 4) Gemini 호출 (DB 저장용 JSON 반환)
+    try:
+        db_json = generate_resume_with_gemini(context)  # {"item_list":[...]}
+    except Exception as e:
+        return JsonResponse({"error": "Gemini generation failed", "detail": str(e)}, status=500)
+
+    # 5) 실제 DB 저장
+    try:
+        resume_obj = save_resume_db_json(request.user, db_json)
+    except Exception as e:
+        return JsonResponse({"error": "DB save failed", "detail": str(e), "gemini_result": db_json}, status=500)
+
+    # 6) 응답: resume_id + 저장된 결과 JSON
+    return JsonResponse(
+        {
+            "resume_id": resume_obj.id,
+            "db_json": db_json,  # 프론트에서 미리보기/수정에 쓰기 좋음
+        },
+        json_dumps_params={"ensure_ascii": False},
+    )
+
+@csrf_exempt
+@require_POST
+@login_required
+def generate_resume_pdf(request):
+    try:
+        payload = json.loads(request.body.decode("utf-8") or "{}")
+    except json.JSONDecodeError:
+        return JsonResponse({"error": "Invalid JSON"}, status=400)
+
+    resume_id = payload.get("resume_id")
+    if not resume_id:
+        return JsonResponse({"error": "resume_id is required"}, status=400)
+
+    try:
+        pdf_bytes = render_resume_pdf_from_db(request.user, int(resume_id))
+    except Exception as e:
+        return JsonResponse({"error": "PDF generation failed", "detail": str(e)}, status=500)
+
+    response = HttpResponse(pdf_bytes, content_type="application/pdf")
+    response["Content-Disposition"] = 'attachment; filename="resume.pdf"'
+    return response
 
 
 # =========================

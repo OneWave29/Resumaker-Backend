@@ -1,7 +1,7 @@
 import json
 import os
 from pypdf import PdfReader
-from google import genai
+import google.generativeai as genai
 
 # 프론트 폼에 맞춰서 "반환 JSON 스키마"를 고정해두는 게 핵심
 SCHEMA_EXAMPLE = {

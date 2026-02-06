@@ -1,0 +1,8 @@
+{% for item in resume.items %}
+  {% if item.type == "TITLED" %}
+    <h2>{{ item.sub_title }}</h2>
+    <pre style="white-space: pre-wrap;">{{ item.content }}</pre>
+  {% else %}
+    <h3 style="margin-top:16px;">{{ item.content|linebreaksbr }}</h3>
+  {% endif %}
+{% endfor %}

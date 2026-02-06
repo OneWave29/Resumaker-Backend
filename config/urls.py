@@ -13,7 +13,7 @@ urlpatterns = [
     # API 엔드포인트
     path('api/users/', include('users.urls')),
     path('api/personas/', include('persona.urls')),
-    
+    path('resume/', include('resume.urls')),
     # Swagger/OpenAPI 문서
     path('api/schema/', SpectacularAPIView.as_view(), name='schema'),
     path('api/docs/', SpectacularSwaggerView.as_view(url_name='schema'), name='swagger-ui'),
