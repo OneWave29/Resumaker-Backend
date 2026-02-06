@@ -28,12 +28,20 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # See https://docs.djangoproject.com/en/6.0/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = 'django-insecure-4&&3!gm2+q3hcgrgm_fqdfdjx)o28=i@xs7e-!*%fgyki_uhj*'
+SECRET_KEY = os.getenv(
+    "SECRET_KEY",
+    "django-insecure-4&&3!gm2+q3hcgrgm_fqdfdjx)o28=i@xs7e-!*%fgyki_uhj*",
+)
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+def _env_bool(name, default="False"):
+    return os.getenv(name, default).lower() in ("true", "1", "yes")
 
-ALLOWED_HOSTS = []
+
+DEBUG = _env_bool("DEBUG", "True")
+
+allowed_hosts_env = os.getenv("ALLOWED_HOSTS", "")
+ALLOWED_HOSTS = [host.strip() for host in allowed_hosts_env.split(",") if host.strip()]
 
 GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')
 
@@ -167,3 +175,14 @@ AUTH_USER_MODEL = 'users.User'
 #.env 읽기
 load_dotenv()
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+
+# HTTPS / Proxy settings
+SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+SECURE_SSL_REDIRECT = _env_bool("SECURE_SSL_REDIRECT", "False")
+
+csrf_trusted_origins_env = os.getenv("CSRF_TRUSTED_ORIGINS", "")
+CSRF_TRUSTED_ORIGINS = [
+    origin.strip()
+    for origin in csrf_trusted_origins_env.split(",")
+    if origin.strip()
+]
