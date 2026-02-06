@@ -4,18 +4,19 @@ from rest_framework.response import Response
 from rest_framework import status
 from django.contrib.auth import authenticate, login, logout
 from .serializers import (
-    UserRegistrationSerializer, 
+    UserRegistrationSerializer,
     UserLoginSerializer,
-    UserDetailSerializer
+    UserDetailSerializer,
 )
 from .models import User
 
-@api_view(['POST'])
+
+@api_view(["POST"])
 @permission_classes([AllowAny])
 def register(request):
     """
     회원가입 API
-    
+
     요청 필드:
     - username: 로그인 ID (필수)
     - email: 이메일 (필수, 고유)
@@ -27,59 +28,96 @@ def register(request):
     - phone_number: 연락처 (필수)
     """
     serializer = UserRegistrationSerializer(data=request.data)
-    
+
     if serializer.is_valid():
         user = serializer.save()
         user_detail = UserDetailSerializer(user)
-        
-        return Response({
-            'message': 'User created successfully',
-            'user': user_detail.data
-        }, status=status.HTTP_201_CREATED)
-    
-    return Response({
-        'errors': serializer.errors
-    }, status=status.HTTP_400_BAD_REQUEST)
 
-@api_view(['POST'])
+        return Response(
+            {"message": "User created successfully", "user": user_detail.data},
+            status=status.HTTP_201_CREATED,
+        )
+
+    return Response({"errors": serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
+
+
+@api_view(["POST"])
 @permission_classes([AllowAny])
 def login_view(request):
     """로그인 API"""
     serializer = UserLoginSerializer(data=request.data)
-    
+
     if serializer.is_valid():
-        username = serializer.validated_data['username']
-        password = serializer.validated_data['password']
-        
+        username = serializer.validated_data["username"]
+        password = serializer.validated_data["password"]
+
         user = authenticate(request, username=username, password=password)
-        
+
         if user is not None:
             login(request, user)
             user_detail = UserDetailSerializer(user)
-            
-            return Response({
-                'message': 'Login successful',
-                'user': user_detail.data
-            }, status=status.HTTP_200_OK)
-        else:
-            return Response({
-                'error': 'Invalid credentials'
-            }, status=status.HTTP_401_UNAUTHORIZED)
-    
-    return Response({
-        'errors': serializer.errors
-    }, status=status.HTTP_400_BAD_REQUEST)
 
-@api_view(['POST'])
+            return Response(
+                {"message": "Login successful", "user": user_detail.data},
+                status=status.HTTP_200_OK,
+            )
+        else:
+            return Response(
+                {"error": "Invalid credentials"}, status=status.HTTP_401_UNAUTHORIZED
+            )
+
+    return Response({"errors": serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
+
+
+@api_view(["POST"])
 @permission_classes([IsAuthenticated])
 def logout_view(request):
     """로그아웃 API"""
     logout(request)
-    return Response({
-        'message': 'Logout successful'
-    }, status=status.HTTP_200_OK)
+    return Response({"message": "Logout successful"}, status=status.HTTP_200_OK)
 
-@api_view(['GET'])
+
+@api_view(["POST"])
+@permission_classes([AllowAny])
+def login_view(request):
+    """로그인 API"""
+    serializer = UserLoginSerializer(data=request.data)
+
+    if serializer.is_valid():
+        username = serializer.validated_data["username"]
+        password = serializer.validated_data["password"]
+
+        # 디버깅: 유저 존재 확인
+        try:
+            user_exists = User.objects.get(username=username)
+            print(f"User found: {user_exists.username}")
+            print(f"Is active: {user_exists.is_active}")
+            print(f"Password check: {user_exists.check_password(password)}")
+        except User.DoesNotExist:
+            print(f"User '{username}' does not exist")
+            return Response(
+                {"error": "User does not exist"}, status=status.HTTP_404_NOT_FOUND
+            )
+
+        user = authenticate(request, username=username, password=password)
+
+        if user is not None:
+            login(request, user)
+            user_detail = UserDetailSerializer(user)
+
+            return Response(
+                {"message": "Login successful", "user": user_detail.data},
+                status=status.HTTP_200_OK,
+            )
+        else:
+            return Response(
+                {"error": "Invalid credentials"}, status=status.HTTP_401_UNAUTHORIZED
+            )
+
+    return Response({"errors": serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
+
+
+@api_view(["GET"])
 @permission_classes([IsAuthenticated])
 def user_detail(request):
     """현재 로그인한 유저 정보 조회"""
