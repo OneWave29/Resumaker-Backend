@@ -1,0 +1,56 @@
+name: Deploy to GCP VM
+
+on:
+  push:
+    branches:
+      - dev
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+
+    env:
+      IMAGE_TAG: ${{ github.sha }}
+      GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+      APP_NAME: ${{ secrets.APP_NAME }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Authenticate to GCP
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Configure Docker for GCR
+        run: gcloud auth configure-docker gcr.io
+
+      - name: Build and push image
+        run: |
+          docker build -t gcr.io/${GCP_PROJECT_ID}/${APP_NAME}:${IMAGE_TAG} .
+          docker push gcr.io/${GCP_PROJECT_ID}/${APP_NAME}:${IMAGE_TAG}
+
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_KEY }}
+          script: |
+            export APP_DIR="${{ secrets.APP_DIR }}"
+            export IMAGE_TAG="${{ github.sha }}"
+            cat > "${{ secrets.APP_DIR }}/.env" <<'EOF'
+            SECRET_KEY=${{ secrets.SECRET_KEY }}
+            DEBUG=${{ secrets.DEBUG }}
+            ALLOWED_HOSTS=${{ secrets.ALLOWED_HOSTS }}
+            SECURE_SSL_REDIRECT=${{ secrets.SECURE_SSL_REDIRECT }}
+            CSRF_TRUSTED_ORIGINS=${{ secrets.CSRF_TRUSTED_ORIGINS }}
+            GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }}
+            GCP_PROJECT_ID=${{ secrets.GCP_PROJECT_ID }}
+            APP_NAME=${{ secrets.APP_NAME }}
+            EOF
+            /bin/bash "${{ secrets.APP_DIR }}/scripts/deploy.sh" "${{ github.sha }}"
