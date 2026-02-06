@@ -1,9 +1,13 @@
 from rest_framework.decorators import api_view, permission_classes
-from rest_framework.permissions import AllowAny
+from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework import status
 from django.contrib.auth import authenticate, login, logout
-from .serializers import UserRegistrationSerializer, UserLoginSerializer
+from .serializers import (
+    UserRegistrationSerializer,
+    UserLoginSerializer,
+    UserProfileUpdateSerializer,
+)
 
 @api_view(['POST'])
 @permission_classes([AllowAny])
@@ -64,3 +68,15 @@ def logout_view(request):
     return Response({
         'message': 'Logout successful'
     }, status=status.HTTP_200_OK)
+
+
+@api_view(["PATCH"])
+@permission_classes([IsAuthenticated])
+def update_profile(request):
+    """마이페이지 정보 수정 API"""
+    serializer = UserProfileUpdateSerializer(
+        request.user, data=request.data, partial=True
+    )
+    serializer.is_valid(raise_exception=True)
+    serializer.save()
+    return Response(serializer.data, status=status.HTTP_200_OK)
