@@ -43,6 +43,7 @@ jobs:
           script: |
             export APP_DIR="${{ secrets.APP_DIR }}"
             export IMAGE_TAG="${{ github.sha }}"
+            export GCP_SA_KEY='${{ secrets.GCP_SA_KEY }}'
             cat > "${{ secrets.APP_DIR }}/.env" <<'EOF'
             SECRET_KEY=${{ secrets.SECRET_KEY }}
             DEBUG=${{ secrets.DEBUG }}
