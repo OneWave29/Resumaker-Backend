@@ -32,3 +32,16 @@ pydantic==2.11.7
 # DB (SQLite / PostgreSQL 대비)
 # -------------------------
 psycopg2-binary==2.9.10
+
+# 배포서버에서 필요한 의존성 별도주입
+Django==4.2.27
+django-cors-headers==4.9.0
+drf-spectacular==0.29.0
+google-api-core==2.29.0
+google-auth==2.47.0
+googleapis-common-protos==1.72.0
+protobuf==5.29.6
+requests==2.32.5
+pypdf==4.3.1
+typing_extensions==4.14.1
+gunicorn==21.2.0
