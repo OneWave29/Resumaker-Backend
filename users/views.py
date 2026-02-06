@@ -49,25 +49,6 @@ from .models import User
             },
             request_only=True,
         ),
-        OpenApiExample(
-            'Success Response',
-            value={
-                "message": "User created successfully",
-                "user": {
-                    "id": 1,
-                    "username": "johndoe",
-                    "email": "john@example.com",
-                    "name": "홍길동",
-                    "age": 28,
-                    "gender": "M",
-                    "job": "백엔드 개발자",
-                    "phone_number": "010-1234-5678",
-                    "date_joined": "2026-02-06T12:00:00Z"
-                }
-            },
-            response_only=True,
-            status_codes=['201'],
-        ),
     ],
 )
 @api_view(["POST"])
@@ -92,10 +73,9 @@ def register(request):
     tags=['Users'],
     summary='로그인',
     description='''
-    사용자 인증 및 세션 생성
+    이메일과 비밀번호로 로그인합니다.
     
     성공 시 세션 쿠키가 자동으로 설정됩니다.
-    이후 요청에서는 쿠키를 통해 자동 인증됩니다.
     ''',
     request=UserLoginSerializer,
     responses={
@@ -107,7 +87,7 @@ def register(request):
         OpenApiExample(
             'Login Request',
             value={
-                "username": "johndoe",
+                "email": "john@example.com",  # username → email
                 "password": "securepass123"
             },
             request_only=True,
@@ -136,18 +116,32 @@ def register(request):
 @api_view(["POST"])
 @permission_classes([AllowAny])
 def login_view(request):
-    """로그인 API"""
+    """로그인 API (이메일 + 비밀번호)"""
     serializer = UserLoginSerializer(data=request.data)
 
     if serializer.is_valid():
-        username = serializer.validated_data["username"]
+        email = serializer.validated_data["email"]  # username → email
         password = serializer.validated_data["password"]
 
-        user = authenticate(request, username=username, password=password)
+        # 이메일로 유저 찾기
+        try:
+            user = User.objects.get(email=email)
+        except User.DoesNotExist:
+            return Response(
+                {"error": "User with this email does not exist"},
+                status=status.HTTP_404_NOT_FOUND
+            )
 
-        if user is not None:
-            login(request, user)
-            user_detail = UserDetailSerializer(user)
+        # Django authenticate는 username을 사용하므로 username 전달
+        authenticated_user = authenticate(
+            request, 
+            username=user.username, 
+            password=password
+        )
+
+        if authenticated_user is not None:
+            login(request, authenticated_user)
+            user_detail = UserDetailSerializer(authenticated_user)
 
             return Response(
                 {"message": "Login successful", "user": user_detail.data},
@@ -155,7 +149,8 @@ def login_view(request):
             )
         else:
             return Response(
-                {"error": "Invalid credentials"}, status=status.HTTP_401_UNAUTHORIZED
+                {"error": "Invalid password"},
+                status=status.HTTP_401_UNAUTHORIZED
             )
 
     return Response({"errors": serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
@@ -165,9 +160,7 @@ def login_view(request):
     tags=['Users'],
     summary='로그아웃',
     description='현재 세션을 종료하고 로그아웃합니다.',
-    responses={
-        200: OpenApiTypes.OBJECT,
-    },
+    responses={200: OpenApiTypes.OBJECT},
     examples=[
         OpenApiExample(
             'Success Response',
@@ -188,10 +181,7 @@ def logout_view(request):
     tags=['Users'],
     summary='내 정보 조회',
     description='현재 로그인한 사용자의 정보를 조회합니다.',
-    responses={
-        200: UserDetailSerializer,
-        401: OpenApiTypes.OBJECT,
-    },
+    responses={200: UserDetailSerializer, 401: OpenApiTypes.OBJECT},
     examples=[
         OpenApiExample(
             'Success Response',
