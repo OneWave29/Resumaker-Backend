@@ -12,6 +12,7 @@ urlpatterns = [
     
     # API 엔드포인트
     path('api/users/', include('users.urls')),
+    path('api/resume/', include('resume.urls')),
     path('api/personas/', include('persona.urls')),
     
     # Swagger/OpenAPI 문서

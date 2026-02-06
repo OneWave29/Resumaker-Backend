@@ -45,7 +45,7 @@ INSTALLED_APPS = [
     'django.contrib.messages',
     'django.contrib.staticfiles',
     'users',
-    # 'resume',
+    'resume',
     'persona',
     'rest_framework',
     'corsheaders',
