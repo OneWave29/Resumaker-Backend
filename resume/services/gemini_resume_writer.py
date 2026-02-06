@@ -3,7 +3,7 @@ import os
 import json
 import re
 from typing import Dict, Any
-from google import genai
+import google.generativeai as genai
 
 
 def _extract_json(text: str) -> Dict[str, Any]:
