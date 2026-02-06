@@ -11,6 +11,13 @@ https://docs.djangoproject.com/en/6.0/ref/settings/
 """
 
 from pathlib import Path
+import os
+from dotenv import load_dotenv
+
+# .env 파일 로드
+load_dotenv()
+
+BASE_DIR = Path(__file__).resolve().parent.parent
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -27,8 +34,7 @@ DEBUG = True
 
 ALLOWED_HOSTS = []
 
-
-# Application definition
+GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')
 
 INSTALLED_APPS = [
     'django.contrib.admin',
@@ -39,7 +45,7 @@ INSTALLED_APPS = [
     'django.contrib.staticfiles',
     'users',
     # 'resume',
-    # 'persona',
+    'persona',
     'rest_framework',
     'corsheaders',
 ]
